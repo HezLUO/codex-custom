@@ -118,6 +118,8 @@ def checked_current(state, official):
 def install(archive, checksum, bin_dir, state):
     official = preflight()
     root, metadata, inventory = official
+    if archive.stat().st_size > artifact.MAX_ARCHIVE:
+        raise RuntimeError('Release archive size limit exceeded')
     if not checksum or artifact.digest(archive.read_bytes()) != checksum:
         raise RuntimeError('Release archive SHA-256 mismatch')
     manifest, payload = artifact.read_archive(archive)

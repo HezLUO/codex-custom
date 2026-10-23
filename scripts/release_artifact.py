@@ -36,7 +36,10 @@ REVIEWED_LITERALS = {
     'b5763688815b9b9dd18772e235bcf8324269b938dc0fd8e50b6341101a95702e',
 }
 BASE_MEMBERS = {'bin/codex', 'LICENSE', 'NOTICE', 'DEPENDENCY-NOTICES.txt'}
-RUNTIME_MEMBERS = {'runtime/precompiled.py', 'runtime/release_artifact.py', 'runtime/update-codex-custom.py', 'bootstrap.sh'}
+RUNTIME_MEMBERS = {'runtime/precompiled.py', 'runtime/release_artifact.py', 'runtime/update-codex-custom.py', 'bootstrap.sh', 'bootstrap.py'}
+
+MAX_ARCHIVE = 256 * 1024 * 1024
+MAX_UNPACKED = 768 * 1024 * 1024
 
 class ReleaseError(ValueError):
     pass
@@ -52,13 +55,17 @@ def privacy_check(data):
 
 def read_archive(path):
     """Return (validated manifest, payload bytes); never extract untrusted paths."""
+    if Path(path).stat().st_size > MAX_ARCHIVE:
+        raise ReleaseError('Release archive size limit exceeded')
     payload = {}
     modes = {}
+    total = 0
     try:
         with tarfile.open(path, 'r:gz') as archive:
             for item in archive:
+                total += item.size
                 if (not item.isfile() or item.name not in BASE_MEMBERS | RUNTIME_MEMBERS | {'release.json'}
-                        or item.name in payload or item.size > 512 * 1024 * 1024
+                        or item.name in payload or item.size > 512 * 1024 * 1024 or total > MAX_UNPACKED
                         or item.mode not in (0o644, 0o755) or item.pax_headers):
                     raise ReleaseError('archive member rejected')
                 payload[item.name] = archive.extractfile(item).read()

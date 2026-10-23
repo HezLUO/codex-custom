@@ -173,5 +173,14 @@ os.execve = execute
         self.assertIn('Installation stopped', result.stderr)
         self.assertFalse((self.bin / 'codex-custom').exists())
 
+    def test_oversized_local_archive_is_rejected_before_digest_or_extraction(self):
+        archive = self.root / 'oversized.tar.gz'
+        with archive.open('wb') as stream:
+            stream.truncate(256 * 1024 * 1024 + 1)
+        result = self.command('--archive', str(archive), '--sha256', '0' * 64)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('archive size limit', result.stderr)
+        self.assertFalse((self.root / 'state').exists())
+
 if __name__ == '__main__':
     unittest.main()

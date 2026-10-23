@@ -10,7 +10,7 @@ Context 95% left (33.8K used / 475K)
 
 这是可审查的本地开源候选版本，与 OpenAI 无隶属或背书关系。项目使用 HezLUO/codex-custom 私有 GitHub 仓库管理任务，源码尚未推送或公开，许可方案尚待审定。已确定的发行目标是通过一条终端命令下载安装经过验证的预编译版本，源码构建保留为可选方式，见[安装方式决定](docs/adr/0001-precompiled-installation.md)。
 
-已实现本地预编译候选安装与离线启动。在线下载与生命周期更新仍待后续任务完成；目前没有公开安装地址。不包含用户数据或旧项目历史。
+已实现本地预编译候选安装与离线启动。已实现从精确版本发行源下载；生命周期更新仍待后续任务完成。目前没有公开安装地址。不包含用户数据或旧项目历史。
 
 ## 支持范围
 
@@ -19,6 +19,26 @@ Context 95% left (33.8K used / 475K)
 - 本地预编译安装只需要 Python 3.9+、系统 codesign 和匹配官方包；无需 Rust、Cargo、Git 或源码目录。官方包必须位于当前 `CODEX_HOME`（默认 `~/.codex`）的 `packages/standalone/releases` 中。
 - 显式开发者源码构建还需要 Git、Xcode Command Line Tools（含 `strip`、`codesign`）、通过 rustup 安装的 `cargo` 和 `rustup`（在 PATH 中），以及下载上游源码和 Rust 依赖的网络。
 - 更新器根据匹配版本源码的 `codex-rs/rust-toolchain.toml` 安装工具链。0.164.0 使用 Rust 1.99.1。首次构建为大型 Rust 工作区的优化构建，预留数十 GB 空间和较长编译时间；具体开销随机器、缓存而异，尚无全新环境基准。
+
+## 一条命令下载安装
+
+以下地址是发布后的命令格式；仓库仍为私有、源码与发行尚未上传，因此目前不能从该公开地址安装：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/HezLUO/codex-custom/main/bootstrap.sh | sh
+```
+
+要求 Python 3.9+、macOS Apple Silicon、系统 codesign 与完整匹配的官方 standalone CLI 0.164.0；普通用户无需 Rust、Cargo 或 Git。shell 在下载 Python 引导器前检查 Python 与系统；Python 在下载发行前检查官方包和资源。安装器只选择明确绑定官方版本与平台的 tag，从不盲用 latest。初始 shell/Python 引导器由所选源码地址提供，属于安装信任入口；HTTPS 和同源摘要不等于独立发布者签名，详见[产物格式与验证边界](docs/PRECOMPILED-FORMAT.md)。
+
+在已下载的源码候选中可运行 `python3 scripts/install.py`；它走相同在线下载与统一安装过程。安装成功后运行 `codex-custom --version` 或 `codex-custom`；若命令目录不在 PATH 中，使用完整入口路径。未知发行、网络中断、错误摘要或签名均停止并保留原有效安装，使用官方 `codex` 恢复工作。没有隐式源码构建。
+
+本地测试服务使用同一入口：
+
+```sh
+curl -fsSL http://127.0.0.1:PORT/bootstrap.sh | CODEX_CUSTOM_BOOTSTRAP_URL=http://127.0.0.1:PORT/bootstrap.py CODEX_CUSTOM_RELEASE_SOURCE=http://127.0.0.1:PORT sh -s -- --bin-dir "$HOME/.local/candidate-bin"
+```
+
+仅 loopback 测试来源允许 HTTP；这条测试命令并不表示 GitHub 上已有可下载的公开发行。
 
 ## 本地预编译安装
 
