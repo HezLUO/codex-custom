@@ -9,7 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_FILES = {
     '.gitignore', 'LICENSE', 'NOTICE', 'README.md', 'codex-custom',
     'update-codex-custom.py', 'patches/codex-0.164.0-context-details.patch',
-    'scripts/install.py', 'scripts/audit-release.py',
+    'scripts/install.py', 'scripts/audit-release.py', 'scripts/release_artifact.py',
+    'tests/test_release_artifact.py', 'docs/PRECOMPILED-FORMAT.md',
     'tests/test_updater.py', 'tests/test_install.py',
     'docs/MAINTENANCE.md', 'docs/VALIDATION.md', 'docs/RELEASE.md',
     'docs/INSTALLATION-RESEARCH.md', 'docs/adr/0001-precompiled-installation.md',
