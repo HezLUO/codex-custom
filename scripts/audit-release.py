@@ -7,7 +7,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_FILES = {
-    '.gitignore', 'LICENSE', 'NOTICE', 'README.md', 'codex-custom',
+    'bootstrap.sh', 'bootstrap.py', 'tests/test_download.py', '.gitignore', 'LICENSE', 'NOTICE', 'README.md', 'codex-custom',
     'update-codex-custom.py', 'patches/codex-0.164.0-context-details.patch',
     'scripts/install.py', 'scripts/install-source.py', 'scripts/precompiled.py', 'tests/test_precompiled.py', 'scripts/audit-release.py', 'scripts/release_artifact.py',
     'tests/test_release_artifact.py', 'docs/PRECOMPILED-FORMAT.md',
