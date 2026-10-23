@@ -5,4 +5,7 @@ if [ "${CODEX_CUSTOM_STATUS_LINE+x}" != x ]; then
   CODEX_CUSTOM_STATUS_LINE='["model-with-reasoning","approval-mode","context-details","weekly-limit","git-branch","task-progress"]'
 fi
 export CODEX_CUSTOM_STATUS_LINE
-exec python3 "$script_dir/update-codex-custom.py" --launch -- "$@"
+if [ "${CODEX_CUSTOM_BUILD_FROM_SOURCE:-0}" = 1 ]; then
+  exec python3 "$script_dir/update-codex-custom.py" --launch -- "$@"
+fi
+exec python3 "$script_dir/scripts/precompiled.py" --launch -- "$@"

@@ -6,7 +6,10 @@
 python3 scripts/release_artifact.py package \
   --binary ../candidate/codex --provenance ../candidate/provenance.json \
   --dependency-notices ../candidate/DEPENDENCY-NOTICES.txt \
-  --release-id 0.164.0-custom.1 --output ../candidate/codex-custom.tar.gz
+  --release-id 0.164.0-custom.1 --output ../candidate/codex-custom.tar.gz \
+  --runtime runtime/precompiled.py=scripts/precompiled.py \
+  --runtime runtime/release_artifact.py=scripts/release_artifact.py \
+  --runtime runtime/update-codex-custom.py=update-codex-custom.py
 python3 scripts/release_artifact.py inspect ../candidate/codex-custom.tar.gz
 ```
 
@@ -37,3 +40,5 @@ python3 scripts/release_artifact.py sanitize \
 依赖通知来自现有 release 前端 fingerprint 图及精确缓存源码记录：1,366 个图节点全部解析，保守收集 1,029 个软件包，包含构建依赖，不能等同最终链接组件的精确清单。另纳入 Rust 标准库、现有内嵌技能和本地原生依赖通知；动态依赖只有 macOS 系统库，不复制这些系统文件。MPL 组件提供对应版本源码 URL。通知文本 SHA-256 为 `c339b8a87f9eedfbd0e10c1b0fd08aa1bce36338f9f313b6b8f89dc26dfe62e7`。
 
 六个上游软件包在精确版本源码中缺少独立许可文本，通知保留声明条款、可用作者资料及来源依据。cookie-factory、debugserver-types、fax、fax_derive 四个 MIT 情况仍需维护者在公开分发前审查；eventsource-stream 和 io_tee 使用其声明的 Apache-2.0 选项。不虚构版权人或年份。来源记录将状态标为 `local-reviewed/public-maintainer-review-required`，允许本地候选验证，不表示许可、公开分发或发布授权已全部完成。全量历史 TUI 测试的 38 个已诊断失败继续保留，不能描述为全部通过。
+
+本地安装要求三个 runtime 成员齐备；源码构建模块仅复用官方包识别与复制边界，默认运行路径不调用其构建入口。预编译 receipt 覆盖前端、运行组件及复制的完整资源；共享 state 锁保护安装和启动核对。

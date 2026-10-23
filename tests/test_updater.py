@@ -43,6 +43,7 @@ class UpdaterTests(unittest.TestCase):
                 "import json, os, sys\nprint(json.dumps({'args': sys.argv[1:], 'status_line': os.environ.get('CODEX_CUSTOM_STATUS_LINE')}))\n")
             environment = os.environ.copy()
             environment.pop("CODEX_CUSTOM_STATUS_LINE", None)
+            environment["CODEX_CUSTOM_BUILD_FROM_SOURCE"] = "1"
             result = subprocess.run([str(root / "codex-custom"), "resume", "--last",
                                      "-c", 'model="example"'],
                                     check=True, capture_output=True, text=True, env=environment)
