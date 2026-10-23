@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ "${CODEX_CUSTOM_STATUS_LINE+x}" != x ]; then
+  CODEX_CUSTOM_STATUS_LINE='["model-with-reasoning","approval-mode","context-details","weekly-limit","git-branch","task-progress"]'
+fi
+export CODEX_CUSTOM_STATUS_LINE
+exec python3 "$script_dir/update-codex-custom.py" --launch -- "$@"

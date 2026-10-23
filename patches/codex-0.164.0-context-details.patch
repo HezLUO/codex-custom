@@ -1,0 +1,241 @@
+diff --git a/codex-rs/tui/src/bottom_pane/status_line_setup.rs b/codex-rs/tui/src/bottom_pane/status_line_setup.rs
+index 9567424..b57f042 100644
+--- a/codex-rs/tui/src/bottom_pane/status_line_setup.rs
++++ b/codex-rs/tui/src/bottom_pane/status_line_setup.rs
+@@ -1,3 +1,4 @@
++// Modified by codex-custom contributors: context details and frontend status preferences.
+ //! Status line configuration view for customizing the TUI status bar.
+ //!
+ //! This module provides an interactive picker for selecting which items appear
+@@ -158,6 +159,9 @@ pub(crate) enum StatusLineItem {
+ 
+     /// Latest checklist task progress from `update_plan` (if available).
+     TaskProgress,
++
++    /// Active context tokens, capacity, and percentage remaining, as in `/status`.
++    ContextDetails,
+ }
+ 
+ impl StatusLineItem {
+@@ -186,6 +190,9 @@ impl StatusLineItem {
+             StatusLineItem::ContextUsed => {
+                 "Percentage of context window used (omitted when unknown)"
+             }
++            StatusLineItem::ContextDetails => {
++                "Active context tokens, capacity, and percentage remaining (same as /status)"
++            }
+             StatusLineItem::FiveHourLimit => {
+                 "Remaining usage on the primary usage limit (omitted when unavailable)"
+             }
+@@ -238,6 +245,7 @@ impl StatusLineItem {
+             StatusLineItem::ApprovalMode => StatusSurfacePreviewItem::ApprovalMode,
+             StatusLineItem::ContextRemaining => StatusSurfacePreviewItem::ContextRemaining,
+             StatusLineItem::ContextUsed => StatusSurfacePreviewItem::ContextUsed,
++            StatusLineItem::ContextDetails => StatusSurfacePreviewItem::ContextDetails,
+             StatusLineItem::FiveHourLimit => StatusSurfacePreviewItem::FiveHourLimit,
+             StatusLineItem::WeeklyLimit => StatusSurfacePreviewItem::WeeklyLimit,
+             StatusLineItem::CodexVersion => StatusSurfacePreviewItem::CodexVersion,
+diff --git a/codex-rs/tui/src/bottom_pane/status_line_style.rs b/codex-rs/tui/src/bottom_pane/status_line_style.rs
+index 6ef9003..53463a3 100644
+--- a/codex-rs/tui/src/bottom_pane/status_line_style.rs
++++ b/codex-rs/tui/src/bottom_pane/status_line_style.rs
+@@ -1,3 +1,4 @@
++// Modified by codex-custom contributors: context details and frontend status preferences.
+ //! Theme-derived styling for the configurable footer statusline.
+ 
+ use ratatui::style::Color;
+@@ -46,6 +47,7 @@ impl StatusLineAccent {
+             StatusLineItem::Status => Self::State,
+             StatusLineItem::ContextRemaining
+             | StatusLineItem::ContextUsed
++            | StatusLineItem::ContextDetails
+             | StatusLineItem::ContextWindowSize
+             | StatusLineItem::UsedTokens
+             | StatusLineItem::TotalInputTokens
+diff --git a/codex-rs/tui/src/bottom_pane/status_surface_preview.rs b/codex-rs/tui/src/bottom_pane/status_surface_preview.rs
+index 7389236..d965687 100644
+--- a/codex-rs/tui/src/bottom_pane/status_surface_preview.rs
++++ b/codex-rs/tui/src/bottom_pane/status_surface_preview.rs
+@@ -1,3 +1,4 @@
++// Modified by codex-custom contributors: context details and frontend status preferences.
+ use std::collections::BTreeMap;
+ 
+ use codex_protocol::ThreadId;
+@@ -23,6 +24,7 @@ pub(crate) enum StatusSurfacePreviewItem {
+     ApprovalMode,
+     ContextRemaining,
+     ContextUsed,
++    ContextDetails,
+     FiveHourLimit,
+     WeeklyLimit,
+     CodexVersion,
+@@ -61,6 +63,7 @@ impl StatusSurfacePreviewItem {
+             StatusSurfacePreviewItem::ApprovalMode => "on-request",
+             StatusSurfacePreviewItem::ContextRemaining => "Context 0% left",
+             StatusSurfacePreviewItem::ContextUsed => "Context 0% used",
++            StatusSurfacePreviewItem::ContextDetails => "Context unknown",
+             StatusSurfacePreviewItem::FiveHourLimit => "primary 0%",
+             StatusSurfacePreviewItem::WeeklyLimit => "secondary 0%",
+             StatusSurfacePreviewItem::CodexVersion => "0.0.0",
+@@ -99,6 +102,7 @@ impl StatusSurfacePreviewItem {
+             Self::ApprovalMode,
+             Self::ContextRemaining,
+             Self::ContextUsed,
++            Self::ContextDetails,
+             Self::FiveHourLimit,
+             Self::WeeklyLimit,
+             Self::CodexVersion,
+diff --git a/codex-rs/tui/src/chatwidget/status_surfaces.rs b/codex-rs/tui/src/chatwidget/status_surfaces.rs
+index d7340e5..8d4710f 100644
+--- a/codex-rs/tui/src/chatwidget/status_surfaces.rs
++++ b/codex-rs/tui/src/chatwidget/status_surfaces.rs
+@@ -1,3 +1,4 @@
++// Modified by codex-custom contributors: context details and frontend status preferences.
+ //! Status-line and terminal-title rendering helpers for `ChatWidget`.
+ //!
+ //! Keeping this logic in a focused submodule makes the additive title/status
+@@ -773,6 +774,26 @@ impl ChatWidget {
+             StatusLineItem::ContextUsed => self
+                 .status_line_context_used_percent()
+                 .map(|used| format!("Context {used}% used")),
++            StatusLineItem::ContextDetails => {
++                if self.token_usage_pending {
++                    return None;
++                }
++                // Match /status, including its runtime-window selection and reserved baseline.
++                // The existing percentage-only footer falls back to the config even when
++                // runtime usage has an unknown window; /status deliberately does not.
++                let default_usage = TokenUsage::default();
++                let (usage, window) = match self.token_info.as_ref() {
++                    Some(info) => (&info.last_token_usage, info.model_context_window),
++                    None => (&default_usage, self.config.model_context_window),
++                };
++                let window = window?;
++                let remaining = usage.percent_of_context_window_remaining(window);
++                let used = format_tokens_compact(usage.tokens_in_context_window());
++                let capacity = format_tokens_compact(window);
++                Some(format!(
++                    "Context {remaining}% left ({used} used / {capacity})"
++                ))
++            }
+             StatusLineItem::FiveHourLimit => {
+                 let (window, is_secondary) = self
+                     .rate_limit_snapshots_by_limit_id
+@@ -880,6 +901,7 @@ impl ChatWidget {
+             StatusSurfacePreviewItem::ApprovalMode => StatusLineItem::ApprovalMode,
+             StatusSurfacePreviewItem::ContextRemaining => StatusLineItem::ContextRemaining,
+             StatusSurfacePreviewItem::ContextUsed => StatusLineItem::ContextUsed,
++            StatusSurfacePreviewItem::ContextDetails => StatusLineItem::ContextDetails,
+             StatusSurfacePreviewItem::FiveHourLimit => StatusLineItem::FiveHourLimit,
+             StatusSurfacePreviewItem::WeeklyLimit => StatusLineItem::WeeklyLimit,
+             StatusSurfacePreviewItem::CodexVersion => StatusLineItem::CodexVersion,
+diff --git a/codex-rs/tui/src/chatwidget/tests/status_and_layout.rs b/codex-rs/tui/src/chatwidget/tests/status_and_layout.rs
+index 65d7739..9d721bc 100644
+--- a/codex-rs/tui/src/chatwidget/tests/status_and_layout.rs
++++ b/codex-rs/tui/src/chatwidget/tests/status_and_layout.rs
+@@ -1,3 +1,4 @@
++// Modified by codex-custom contributors: context details and frontend status preferences.
+ use super::helpers::drain_insert_history_transcript;
+ use super::*;
+ use crate::bottom_pane::goal_status_indicator_line;
+@@ -297,6 +298,77 @@ async fn token_usage_update_uses_runtime_context_window() {
+     );
+ }
+ 
++#[tokio::test]
++async fn context_details_matches_status_after_usage_updates() {
++    let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
++    chat.config.model_context_window = Some(1_000_000);
++    chat.local_settings.tui.status_line = Some(vec!["context-details".to_string()]);
++
++    // A decreasing active context models a post-compaction update. Cumulative
++    // usage stays much larger than the active window throughout the sequence.
++    for (tokens, window, expected) in [
++        (33_800, 475_000, "Context 95% left (33.8K used / 475K)"),
++        (12_700, 13_000, "Context 30% left (12.7K used / 13K)"),
++        (0, 475_000, "Context 100% left (0 used / 475K)"),
++        (600_000, 475_000, "Context 0% left (600K used / 475K)"),
++    ] {
++        let mut info = make_token_info(tokens, window);
++        info.total_token_usage.total_tokens = 9_000_000;
++        info.total_token_usage.input_tokens = 8_000_000;
++        handle_token_count(&mut chat, Some(info));
++        chat.refresh_status_line();
++        assert_eq!(status_line_text(&chat).as_deref(), Some(expected));
++        assert_eq!(
++            chat.status_surface_preview_data()
++                .value_for(crate::bottom_pane::StatusLineItem::ContextDetails.preview_item()),
++            Some(expected)
++        );
++
++        chat.add_status_output(false, None);
++        let cells = drain_insert_history_with(&mut rx, |cell| cell.display_lines(200));
++        let context_line = cells
++            .last()
++            .expect("status output inserted")
++            .iter()
++            .map(ToString::to_string)
++            .find(|line| line.contains("Context window"))
++            .expect("context window line");
++        let status_value = context_line
++            .split_once("Context window:")
++            .expect("context window label")
++            .1
++            .trim();
++        assert_eq!(expected, format!("Context {status_value}"));
++    }
++}
++
++#[tokio::test]
++async fn context_details_handles_pending_and_unknown_usage_like_status() {
++    let (mut chat, _rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
++    let item = crate::bottom_pane::StatusLineItem::ContextDetails;
++    chat.config.model_context_window = Some(475_000);
++    chat.token_info = None;
++    chat.token_usage_pending = false;
++    assert_eq!(
++        chat.status_line_value_for_item(item).as_deref(),
++        Some("Context 100% left (0 used / 475K)")
++    );
++
++    chat.token_usage_pending = true;
++    assert_eq!(chat.status_line_value_for_item(item), None);
++    chat.token_usage_pending = false;
++    chat.config.model_context_window = None;
++    assert_eq!(chat.status_line_value_for_item(item), None);
++
++    // A known config capacity must not replace an explicitly unknown runtime
++    // window: /status also omits the context row in this case.
++    chat.config.model_context_window = Some(475_000);
++    let mut info = make_token_info(33_800, 475_000);
++    info.model_context_window = None;
++    chat.token_info = Some(info);
++    assert_eq!(chat.status_line_value_for_item(item), None);
++}
++
+ #[tokio::test]
+ async fn status_line_git_summary_items_render_values() {
+     let (mut chat, _rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
+diff --git a/codex-rs/tui/src/local_settings.rs b/codex-rs/tui/src/local_settings.rs
+index 1d0d7eb..c097fa5 100644
+--- a/codex-rs/tui/src/local_settings.rs
++++ b/codex-rs/tui/src/local_settings.rs
+@@ -1,3 +1,4 @@
++// Modified by codex-custom contributors: context details and frontend status preferences.
+ //! Client-owned preferences and persistence paths, independent of active server settings.
+ //!
+ //! The first frame reads preferences from bootstrap TOML without executable core config.
+@@ -166,6 +167,13 @@ impl LocalSettings {
+                 .and_then(|tui| tui.get("animations"))
+                 .is_some();
+         }
++        // Keep this frontend-only preference out of server configuration overrides.
++        if let Some(items) = std::env::var("CODEX_CUSTOM_STATUS_LINE")
++            .ok()
++            .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
++        {
++            self.tui.status_line = Some(items);
++        }
+         self.tui.animations &= system_motion == crate::motion::MotionMode::Animated;
+         let mut audio = toml::Value::Table(Default::default());
+         for layer in layers.layers_low_to_high() {
