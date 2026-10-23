@@ -12,6 +12,9 @@ PUBLIC_FILES = {
     'scripts/install.py', 'scripts/audit-release.py',
     'tests/test_updater.py', 'tests/test_install.py',
     'docs/MAINTENANCE.md', 'docs/VALIDATION.md', 'docs/RELEASE.md',
+    'docs/INSTALLATION-RESEARCH.md', 'docs/adr/0001-precompiled-installation.md',
+    'AGENTS.md', 'docs/agents/issue-tracker.md',
+    'docs/agents/triage-labels.md', 'docs/agents/domain.md',
 }
 # Report only rule labels and object IDs, never matching content.
 RULES = {

@@ -8,7 +8,9 @@ Context 95% left (33.8K used / 475K)
 
 当前上下文用量来自官方 `last_token_usage`，使用官方百分比公式；累计会话 token 不作为当前用量。上下文未知或更新尚未完成时，字段按补丁规则隐藏。
 
-这是可审查的本地开源候选版本，与 OpenAI 无隶属或背书关系。名称、许可和发行范围目前按本仓库方案准备，公开前由维护者审定。只分发源码、补丁和构建脚本；不包含官方或定制二进制、用户数据和旧项目历史。
+这是可审查的本地开源候选版本，与 OpenAI 无隶属或背书关系。项目使用 HezLUO/codex-custom 私有 GitHub 仓库管理任务，源码尚未推送或公开，许可方案尚待审定。已确定的发行目标是通过一条终端命令下载安装经过验证的预编译版本，源码构建保留为可选方式，见[安装方式决定](docs/adr/0001-precompiled-installation.md)。
+
+目前仓库只包含源码、补丁、构建脚本及文档；预编译下载、安装和更新流程尚未实现，也没有公开安装地址。不包含用户数据或旧项目历史。
 
 ## 支持范围
 
@@ -17,7 +19,9 @@ Context 95% left (33.8K used / 475K)
 - 需要 Python 3.9+、Git、Xcode Command Line Tools（含 `strip`、`codesign`）、通过 rustup 安装的 `cargo` 和 `rustup`（在 PATH 中），以及下载上游源码和 Rust 依赖的网络。
 - 更新器根据匹配版本源码的 `codex-rs/rust-toolchain.toml` 安装工具链。0.164.0 使用 Rust 1.99.1。首次构建为大型 Rust 工作区的优化构建，预留数十 GB 空间和较长编译时间；具体开销随机器、缓存而异，尚无全新环境基准。
 
-## 本地使用
+## 当前源码构建方式
+
+以下命令用于当前源码方案，会在首次运行时本地编译；不是计划中的预编译安装入口。
 
 先按官方方式安装并验证 `codex --version`，准备上述依赖，然后在本仓库运行：
 
@@ -83,4 +87,4 @@ python3 scripts/audit-release.py
 
 ## 许可与归属
 
-候选项目采用 Apache-2.0，见 [LICENSE](LICENSE)。补丁包含来自 OpenAI Codex 的上下文，保留上游 [NOTICE](NOTICE)；修改说明见 [维护说明](docs/MAINTENANCE.md)。上游源码为 [openai/codex](https://github.com/openai/codex)，基线 tag 为 `rust-v0.164.0`。许可证及通知保留方案依据 [Apache-2.0 第 4 节](https://www.apache.org/licenses/LICENSE-2.0)。未来若分发二进制，需要另行审计完整依赖、资源许可和再分发通知，本候选版本未做该发行承诺。
+候选项目采用 Apache-2.0，见 [LICENSE](LICENSE)。补丁包含来自 OpenAI Codex 的上下文，保留上游 [NOTICE](NOTICE)；修改说明见 [维护说明](docs/MAINTENANCE.md)。上游源码为 [openai/codex](https://github.com/openai/codex)，基线 tag 为 `rust-v0.164.0`。许可证及通知保留方案依据 [Apache-2.0 第 4 节](https://www.apache.org/licenses/LICENSE-2.0)。计划中的预编译发行还需完成实际产物、依赖、资源许可和再分发通知审查；当前源码审计不代表该发行审查已完成。
