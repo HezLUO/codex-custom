@@ -36,7 +36,7 @@ class PrecompiledTests(unittest.TestCase):
         self.bin = self.root / 'commands'
         adapter = self.root / 'adapter'
         adapter.mkdir()
-        (adapter / 'sitecustomize.py').write_text("""import os, platform, subprocess, json, re, time
+        (adapter / 'sitecustomize.py').write_text("""import os, platform, subprocess, json, re, time, sys
 from pathlib import Path
 platform.system = lambda: 'Darwin'
 platform.machine = lambda: 'arm64'
@@ -48,14 +48,30 @@ def run(command, **kwargs):
     return original(command, **kwargs)
 subprocess.run = run
 def execute(path, arguments, environment):
+    if environment.get('FIXTURE_INTERRUPT_FILE'):
+        import signal
+        def count_interrupt(signum, frame):
+            with Path(environment['FIXTURE_INTERRUPT_FILE']).open('a') as stream:
+                stream.write('I')
+        signal.signal(signal.SIGINT, count_interrupt)
+    if environment.get('FIXTURE_DESCENDANT_FILE'):
+        child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], close_fds=False, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        Path(environment['FIXTURE_DESCENDANT_FILE']).write_text(str(child.pid))
     if environment.get('FIXTURE_HOLD_FILE'):
         hold = Path(environment['FIXTURE_HOLD_FILE'])
-        hold.write_text('running')
+        hold.write_text(str(os.getpid()))
         while hold.exists():
             time.sleep(0.01)
     print(json.dumps({'args': arguments[1:], 'status': environment.get('CODEX_CUSTOM_STATUS_LINE')}))
-    raise SystemExit(0)
+    raise SystemExit(int(environment.get('FIXTURE_EXIT_CODE', '0')))
 os.execve = execute
+original_popen = subprocess.Popen
+class Popen(original_popen):
+    def __init__(self, command, *args, **kwargs):
+        if str(command[0]).endswith('/bin/codex') and Path(command[0]).read_bytes().startswith(bytes.fromhex('cffaedfe')):
+            command = [sys.executable, '-c', 'import os, sys, sitecustomize; sitecustomize.execute(sys.argv[1], sys.argv[1:], os.environ)', *command]
+        super().__init__(command, *args, **kwargs)
+subprocess.Popen = Popen
 original_replace = os.replace
 def replace(source, destination):
     if os.environ.get('FIXTURE_FAIL_ACTIVATION') and str(destination).endswith('/current'):
@@ -304,6 +320,94 @@ os.replace = replace
         del self.env['FIXTURE_FAIL_ACTIVATION']
         result = self.command(*args)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_exited_frontend_does_not_leave_lease_in_background_descendant(self):
+        import signal
+        self.assertEqual(self.command(*self.archive()).returncode, 0)
+        marker = self.root / 'descendant-pid'
+        env = dict(self.env, FIXTURE_DESCENDANT_FILE=str(marker))
+        result = subprocess.run([str(self.bin / 'codex-custom'), '--version'], env=env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        pid = int(marker.read_text())
+        try:
+            os.kill(pid, 0)
+            result = self.command('--uninstall', '--purge')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            os.kill(pid, 0)  # Cleanup must leave the independently running daemon alive.
+        finally:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+
+    def test_supervisor_preserves_exit_status_and_reaps_signalled_frontend(self):
+        import signal
+        import time
+        self.assertEqual(self.command(*self.archive()).returncode, 0)
+        result = subprocess.run([str(self.bin / 'codex-custom'), '--version'], env=dict(self.env, FIXTURE_EXIT_CODE='7'), text=True, capture_output=True)
+        self.assertEqual(result.returncode, 7)
+        for signum in (signal.SIGTERM, signal.SIGHUP):
+            hold = self.root / ('running-' + str(signum))
+            child = subprocess.Popen([str(self.bin / 'codex-custom')], env=dict(self.env, FIXTURE_HOLD_FILE=str(hold)), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            self.addCleanup(lambda process=child: process.kill() if process.poll() is None else None)
+            deadline = time.monotonic() + 10
+            while not hold.exists() and child.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(hold.exists())
+            frontend_pid = int(hold.read_text())
+            child.send_signal(signum)
+            child.communicate(timeout=10)
+            self.assertEqual(child.returncode, 128 + signum)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(frontend_pid, 0)
+        self.assertEqual(self.command('--uninstall', '--purge').returncode, 0)
+
+    def test_terminal_interrupt_is_delivered_once_to_foreground_frontend(self):
+        import fcntl
+        import pty
+        import select
+        import signal
+        import termios
+        import time
+        self.assertEqual(self.command(*self.archive()).returncode, 0)
+        master, slave = pty.openpty()
+        hold = self.root / 'tty-running'
+        count = self.root / 'interrupts'
+        def controlling_terminal():
+            os.setsid()
+            fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+        child = subprocess.Popen([str(self.bin / 'codex-custom')], env=dict(self.env, FIXTURE_HOLD_FILE=str(hold), FIXTURE_INTERRUPT_FILE=str(count)), stdin=slave, stdout=slave, stderr=slave, preexec_fn=controlling_terminal)
+        os.close(slave)
+        try:
+            deadline = time.monotonic() + 10
+            while not hold.exists() and child.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(hold.exists())
+            os.killpg(child.pid, signal.SIGINT)
+            deadline = time.monotonic() + 5
+            while not count.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            time.sleep(0.15)
+            self.assertEqual(count.read_text(), 'I')
+            self.assertIsNone(child.poll())
+            hold.unlink()
+            deadline = time.monotonic() + 10
+            output = bytearray()
+            while child.poll() is None and time.monotonic() < deadline:
+                if select.select([master], [], [], 0.05)[0]:
+                    try:
+                        output.extend(os.read(master, 65536))
+                    except OSError:
+                        break
+            self.assertEqual(child.wait(timeout=1), 0, output.decode(errors='replace'))
+        finally:
+            if child.poll() is None:
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except (PermissionError, ProcessLookupError):
+                    child.kill()
+                child.wait()
+            os.close(master)
 
     def test_missing_archive_stops_without_installing_or_compiling(self):
         result = self.command('--archive', str(self.root / 'missing'), '--sha256', '0' * 64)

@@ -10,6 +10,7 @@ from pathlib import Path
 import platform
 import shutil
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -297,6 +298,48 @@ def update(state, bin_dir, source):
         downloader.download_and_install(source or os.environ.get('CODEX_CUSTOM_RELEASE_SOURCE', downloader.DEFAULT_SOURCE), bin_dir, lock_held=True)
 
 
+def supervise(binary, arguments, environment, lease):
+    child = None
+    pending = []
+    previous = {}
+
+    def forward(signum, frame):
+        if child is None:
+            pending.append(signum)
+            return
+        if child.poll() is not None:
+            return
+        if signum in (signal.SIGINT, signal.SIGQUIT) and os.isatty(0):
+            try:
+                if os.tcgetpgrp(0) == os.getpgrp() == os.getpgid(child.pid):
+                    # The terminal already delivered this signal to the frontend.
+                    return
+            except OSError:
+                pass
+        try:
+            child.send_signal(signum)
+        except ProcessLookupError:
+            pass
+
+    try:
+        for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT, signal.SIGQUIT):
+            previous[signum] = signal.signal(signum, forward)
+        # Only the supervisor owns the lease. A frontend-started official daemon
+        # must remain independent and must never inherit a release lock.
+        child = subprocess.Popen([str(binary), *arguments], env=environment, close_fds=True)
+        for signum in pending:
+            forward(signum, None)
+        result = child.wait()
+        return result if result >= 0 else 128 - result
+    finally:
+        if child is not None and child.poll() is None:
+            child.terminate()
+            child.wait()
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+        lease.close()
+
+
 def launch(state, arguments):
     # Management commands remain available after the official package changes.
     if arguments[:1] in (['--update'], ['--uninstall']):
@@ -323,9 +366,7 @@ def launch(state, arguments):
             raise RuntimeError('Untrusted run lease')
         lease = (release / 'run.lock').open('a')
         fcntl.flock(lease, fcntl.LOCK_SH)
-        # The lease survives exec and keeps cleanup from deleting session resources.
-        os.set_inheritable(lease.fileno(), True)
-    os.execve(str(binary), [str(binary), *arguments], environment)
+    return supervise(binary, arguments, environment, lease)
 
 
 def main(argv=None):
