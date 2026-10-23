@@ -1,6 +1,6 @@
 # codex-custom
 
-社区维护的 Codex CLI 前端补丁与本地构建工具。新增 `context-details` 底栏字段，显示与 `/status` 一致的当前上下文 tokens、容量和剩余百分比，例如：
+社区维护的 Codex CLI 前端补丁与预编译安装工具。新增 `context-details` 底栏字段，显示与 `/status` 一致的当前上下文 tokens、容量和剩余百分比，例如：
 
 ```text
 Context 95% left (33.8K used / 475K)
@@ -10,13 +10,13 @@ Context 95% left (33.8K used / 475K)
 
 这是可审查的本地开源候选版本，与 OpenAI 无隶属或背书关系。项目使用 HezLUO/codex-custom 私有 GitHub 仓库管理任务，源码尚未推送或公开，许可方案尚待审定。已确定的发行目标是通过一条终端命令下载安装经过验证的预编译版本，源码构建保留为可选方式，见[安装方式决定](docs/adr/0001-precompiled-installation.md)。
 
-已实现本地预编译候选安装与离线启动。已实现从精确版本发行源下载；生命周期更新仍待后续任务完成。目前没有公开安装地址。不包含用户数据或旧项目历史。
+已实现预编译候选的下载、本地安装、匹配更新、离线启动及安全卸载。目前没有公开安装地址，实际下载验收使用本地测试服务；源码与产物保留在本机供审查。
 
 ## 支持范围
 
 - 已有运行验收：macOS Apple Silicon，官方 CLI **0.164.0**，官方 standalone `codex` 包布局 v1。
-- 其他平台、npm/Homebrew 等安装方式尚未支持。未来版本会尝试应用同一补丁，但不保证兼容；冲突会停止，需人工移植与验收。
-- 本地预编译安装只需要 Python 3.9+、系统 codesign 和匹配官方包；无需 Rust、Cargo、Git 或源码目录。官方包必须位于当前 `CODEX_HOME`（默认 `~/.codex`）的 `packages/standalone/releases` 中。
+- 其他平台、npm/Homebrew 等安装方式尚未支持。官方版本变化后仅取得明确匹配的发行；尚无发行便停止。未来版本须由维护者移植与验收，不宣称已有真实兼容。
+- 默认预编译安装只需要 Python 3.9+、系统 codesign 和匹配官方包；无需 Rust、Cargo、Git 或源码目录。官方包必须位于当前 `CODEX_HOME`（默认 `~/.codex`）的 `packages/standalone/releases` 中。
 - 显式开发者源码构建还需要 Git、Xcode Command Line Tools（含 `strip`、`codesign`）、通过 rustup 安装的 `cargo` 和 `rustup`（在 PATH 中），以及下载上游源码和 Rust 依赖的网络。
 - 更新器根据匹配版本源码的 `codex-rs/rust-toolchain.toml` 安装工具链。0.164.0 使用 Rust 1.99.1。首次构建为大型 Rust 工作区的优化构建，预留数十 GB 空间和较长编译时间；具体开销随机器、缓存而异，尚无全新环境基准。
 
@@ -52,11 +52,35 @@ codex-custom --version
 codex-custom resume --last
 ```
 
-预编译入口复制自己的运行组件，可移走 checkout。默认状态目录为 `~/.local/share/codex-custom/precompiled`，可用 `CODEX_CUSTOM_STATE_DIR` 选择全新目录；安装后 shim 固定该目录。拒绝自动接管旧源码安装。校验归档、签名、版本、官方完整资源及逐文件收据后才激活；有效匹配版本可离线启动。默认启动从不隐式编译。官方版本或资源变化时会停止并提示使用官方 `codex`。安全卸载和匹配成品更新由后续生命周期任务提供。
+预编译入口复制自己的运行组件，可移走 checkout。默认状态目录为 `~/.local/share/codex-custom/precompiled`，可用 `CODEX_CUSTOM_STATE_DIR` 选择全新目录；安装后 shim 固定该目录。拒绝自动接管旧源码安装。校验归档、签名、版本、官方完整资源及逐文件收据后才激活；有效匹配版本可离线启动。默认启动从不隐式编译。官方版本或资源变化时自动取得明确匹配的预编译发行；下载或校验失败便停止并提示使用官方 `codex`，保留原产物供诊断，不运行不匹配的旧前端。
+
+## 预编译更新、恢复和卸载
+
+官方界面的 **Update now / Later** 保留官方职责；下次运行定制入口时，检查官方版本及逐文件资源收据。匹配本地安装直接离线启动；需要新成品时自动下载该官方版本与平台的精确发行，不新增确认、不编译。真实未来官方升级尚未实测；当前兼容声明仍仅为 0.164.0。
+
+同一官方版本发布了新的定制修订时，显式运行：
+
+```sh
+codex-custom --update
+# 下载失败时使用官方程序继续工作；修复网络/官方安装后重试相同命令
+codex --version
+```
+
+失败不切换当前版本，归档暂存下载目录由本次进程清理；中断可能留下未激活发行，保留供本机诊断，不上传收据、绝对路径或日志。没有自动降级到旧的不同官方版本。若安装收据、入口或组件已被替换，管理命令拒绝操作；从审查过的源码或初始安装入口选择全新 state/bin 安装，勿手动伪造归属。
+
+```sh
+codex-custom --uninstall          # 只移除所属入口，保留发行与本机收据
+# 如要同时清理该安装自己的全部发行，在卸载入口前选择：
+codex-custom --uninstall --purge
+# 入口已卸载时可通过同一源码、相同 state 和 bin-dir 重复管理：
+python3 scripts/install.py --uninstall --purge --bin-dir "$HOME/.local/bin"
+```
+
+默认不删除发行、缓存或诊断文件；预编译路径没有持久下载缓存或运行日志。可选 `--purge` 只删除收据确认的本安装发行及其独立资源包，保留 state 的归属标记和锁文件，便于重复执行。不删除官方程序、官方 current、服务、登录、配置、会话、源码构建缓存或其他安装的包。活动定制会话持有运行租约，清理时会拒绝；先退出这些会话再重试。安装、更新、卸载共享同一个 state 锁，遇另一项管理操作时停止并提示重试。
 
 ## 显式开发者源码构建方式
 
-以下命令用于当前源码方案，会在首次运行时本地编译；不是计划中的预编译安装入口。
+以下命令用于开发者源码方案，会在首次运行时本地编译；不是默认的预编译安装入口。
 
 先按官方方式安装并验证 `codex --version`，准备上述依赖，然后在本仓库运行：
 
@@ -66,7 +90,7 @@ CODEX_CUSTOM_BUILD_FROM_SOURCE=1 ./codex-custom
 CODEX_CUSTOM_BUILD_FROM_SOURCE=1 ./codex-custom resume --last
 ```
 
-首次运行会构建与本机官方版本匹配的前端。它会访问官方配置、登录和会话；不会创建另一套账户。已有可用安装无需迁移。**首次构建会下载源码/依赖并在官方 releases 的独立子目录中生成定制包。**
+显式源码入口首次运行会构建与本机官方版本匹配的前端。它会访问官方配置、登录和会话；不会创建另一套账户。已有可用安装无需迁移。**首次构建会下载源码/依赖并在官方 releases 的独立子目录中生成定制包。**
 
 可选安装启动入口（需保留本源码目录）：
 
@@ -122,4 +146,4 @@ python3 scripts/audit-release.py
 
 ## 许可与归属
 
-候选项目采用 Apache-2.0，见 [LICENSE](LICENSE)。补丁包含来自 OpenAI Codex 的上下文，保留上游 [NOTICE](NOTICE)；修改说明见 [维护说明](docs/MAINTENANCE.md)。上游源码为 [openai/codex](https://github.com/openai/codex)，基线 tag 为 `rust-v0.164.0`。许可证及通知保留方案依据 [Apache-2.0 第 4 节](https://www.apache.org/licenses/LICENSE-2.0)。计划中的预编译发行还需完成实际产物、依赖、资源许可和再分发通知审查；当前源码审计不代表该发行审查已完成。
+候选项目采用 Apache-2.0，见 [LICENSE](LICENSE)。补丁包含来自 OpenAI Codex 的上下文，保留上游 [NOTICE](NOTICE)；修改说明见 [维护说明](docs/MAINTENANCE.md)。上游源码为 [openai/codex](https://github.com/openai/codex)，基线 tag 为 `rust-v0.164.0`。许可证及通知保留方案依据 [Apache-2.0 第 4 节](https://www.apache.org/licenses/LICENSE-2.0)。实际候选已附依赖通知并完成本地检查；四个精确依赖版本缺少独立 MIT 许可文本，仍需维护者在公开分发前审定。ad hoc 签名不认证发布者、未公证。源码审计和本地验收均不代表公开发布授权。

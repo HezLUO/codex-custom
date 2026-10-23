@@ -53,7 +53,7 @@ def privacy_check(data):
             if digest(match.group()) not in REVIEWED_LITERALS:
                 raise ReleaseError('privacy: ' + label)
 
-def read_archive(path):
+def read_archive(path, expected_version='0.164.0'):
     """Return (validated manifest, payload bytes); never extract untrusted paths."""
     if Path(path).stat().st_size > MAX_ARCHIVE:
         raise ReleaseError('Release archive size limit exceeded')
@@ -72,7 +72,7 @@ def read_archive(path):
                 modes[item.name] = item.mode
                 privacy_check(payload[item.name])
         manifest = json.loads(payload.pop('release.json'))
-        if (manifest.get('schema') != 1 or manifest.get('official_version') != '0.164.0'
+        if (manifest.get('schema') != 1 or manifest.get('official_version') != expected_version
                 or manifest.get('target') != 'aarch64-apple-darwin' or manifest.get('layout_version') != 1
                 or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}', manifest.get('release_id', ''))
                 or not re.fullmatch(r'[0-9a-f]{40}', manifest.get('source_commit', ''))
