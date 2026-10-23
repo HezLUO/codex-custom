@@ -29,3 +29,11 @@ python3 scripts/release_artifact.py sanitize \
 ## 分发审查
 
 前端派生自 OpenAI Codex，保留 Apache-2.0 LICENSE 和上游 NOTICE；补丁与本仓库说明记录上下文显示修改。`DEPENDENCY-NOTICES.txt` 必须来自实际锁定依赖及对应源码许可审查，不能用本仓库顶层许可证替代全部依赖通知。必须准确标出不确定依赖与缺失证据；打包成功也不自动代表法律审查完成或批准公开。来源记录可附带分发审查状态与证据摘要。签名目前只提供本地代码完整性验证，不具备开发者身份认证，也没有公证。发行包与原始检查材料留在仓库外，不上传。
+
+## 首个本地候选的实际审查结果
+
+首个 `0.164.0-custom.1` 前端来源提交与历史 receipt 一致；原工作树差异逐字节匹配原补丁，公开补丁仅去除六行归属注释。原前端 SHA-256 为 `f0db692e37868cf47dc688a9d9160a3ba2ad38f4ce18985e2c4d8b09781c8aed`。对独立副本完成 5,641 处等长 home 前缀清理并重新签名后，前端 SHA-256 为 `6c1beb1f82e549ca7b9122fdb6af6da6293e8c367a46cc3687d862aa129a23c4`。严格签名核对、隔离 HOME 下 `--version` 和 `--help` 均通过。没有重跑 Rust 编译，原安装前端摘要保持不变。新前端的真实交互安装验收由后续安装任务完成。
+
+依赖通知来自现有 release 前端 fingerprint 图及精确缓存源码记录：1,366 个图节点全部解析，保守收集 1,029 个软件包，包含构建依赖，不能等同最终链接组件的精确清单。另纳入 Rust 标准库、现有内嵌技能和本地原生依赖通知；动态依赖只有 macOS 系统库，不复制这些系统文件。MPL 组件提供对应版本源码 URL。通知文本 SHA-256 为 `c339b8a87f9eedfbd0e10c1b0fd08aa1bce36338f9f313b6b8f89dc26dfe62e7`。
+
+六个上游软件包在精确版本源码中缺少独立许可文本，通知保留声明条款、可用作者资料及来源依据。cookie-factory、debugserver-types、fax、fax_derive 四个 MIT 情况仍需维护者在公开分发前审查；eventsource-stream 和 io_tee 使用其声明的 Apache-2.0 选项。不虚构版权人或年份。来源记录将状态标为 `local-reviewed/public-maintainer-review-required`，允许本地候选验证，不表示许可、公开分发或发布授权已全部完成。全量历史 TUI 测试的 38 个已诊断失败继续保留，不能描述为全部通过。
