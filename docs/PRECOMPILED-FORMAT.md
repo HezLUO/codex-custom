@@ -21,7 +21,7 @@ python3 scripts/release_artifact.py inspect ../candidate/codex-custom.tar.gz
 
 ## 现有二进制复用
 
-现有优化构建的原始前端确实残留编译时 home 前缀，故不能原样分发。没有因迁移而重编译；`sanitize` 在独立副本中，仅将 Mach-O `__TEXT` 的 `__cstring` / `__const` 中 home 前缀改成等长通用构建前缀。原有字符串长度、偏移、指令及常量后缀保持不变，主要影响源文件诊断路径。其他区段出现此类内容会拒绝，不能盲目修改代码或语义数据。修改后重新 ad hoc 签名，并核对签名与版本。来源记录包含原始/转换后摘要、转换方式与替换数量。原件和日常入口不变。交互功能仍需后续真实安装验收。
+现有优化构建的原始前端确实残留编译时 home 前缀，故不能原样分发。没有因迁移而重编译；`sanitize` 在独立副本中，仅将 Mach-O `__TEXT` 的 `__cstring` / `__const` 中 home 前缀改成等长通用构建前缀。原有字符串长度、偏移、指令及常量后缀保持不变，主要影响源文件诊断路径。其他区段出现此类内容会拒绝，不能盲目修改代码或语义数据。修改后重新 ad hoc 签名，并核对签名与版本。来源记录包含原始/转换后摘要、转换方式与替换数量。原件和日常入口不变。清理后的副本已完成真实隔离安装与交互验收，见验证记录。
 
 ```sh
 python3 scripts/release_artifact.py sanitize \
@@ -37,13 +37,13 @@ python3 scripts/release_artifact.py sanitize \
 
 ## 首个本地候选的实际审查结果
 
-首个 `0.164.0-custom.1` 前端来源提交与历史 receipt 一致；原工作树差异逐字节匹配原补丁，公开补丁相较原运行补丁新增六行归属注释。原前端 SHA-256 为 `f0db692e37868cf47dc688a9d9160a3ba2ad38f4ce18985e2c4d8b09781c8aed`。对独立副本完成 5,641 处等长 home 前缀清理并重新签名后，前端 SHA-256 为 `6c1beb1f82e549ca7b9122fdb6af6da6293e8c367a46cc3687d862aa129a23c4`。严格签名核对、隔离 HOME 下 `--version` 和 `--help` 均通过。没有重跑 Rust 编译，原安装前端摘要保持不变。新前端的真实交互安装验收由后续安装任务完成。
+首个 `0.164.0-custom.1` 前端来源提交与历史 receipt 一致；原工作树差异逐字节匹配原补丁，公开补丁相较原运行补丁新增六行归属注释。原前端 SHA-256 为 `f0db692e37868cf47dc688a9d9160a3ba2ad38f4ce18985e2c4d8b09781c8aed`。对独立副本完成 5,641 处等长 home 前缀清理并重新签名后，前端 SHA-256 为 `6c1beb1f82e549ca7b9122fdb6af6da6293e8c367a46cc3687d862aa129a23c4`。严格签名核对、隔离 HOME 下 `--version` 和 `--help` 均通过。没有重跑 Rust 编译，原安装前端摘要保持不变。新前端随后已在无构建工具且禁止源码读取的隔离环境完成真实安装与交互验收。
 
 依赖通知来自现有 release 前端 fingerprint 图及精确缓存源码记录：1,366 个图节点全部解析，保守收集 1,029 个软件包，包含构建依赖，不能等同最终链接组件的精确清单。另纳入 Rust 标准库、现有内嵌技能和本地原生依赖通知；动态依赖只有 macOS 系统库，不复制这些系统文件。MPL 组件提供对应版本源码 URL。通知文本 SHA-256 为 `c339b8a87f9eedfbd0e10c1b0fd08aa1bce36338f9f313b6b8f89dc26dfe62e7`。
 
 六个上游软件包在精确版本源码中缺少独立许可文本，通知保留声明条款、可用作者资料及来源依据。cookie-factory、debugserver-types、fax、fax_derive 四个 MIT 情况仍需维护者在公开分发前审查；eventsource-stream 和 io_tee 使用其声明的 Apache-2.0 选项。不虚构版权人或年份。来源记录将状态标为 `local-reviewed/public-maintainer-review-required`，允许本地候选验证，不表示许可、公开分发或发布授权已全部完成。全量历史 TUI 测试的 38 个已诊断失败继续保留，不能描述为全部通过。
 
-本地安装要求三个 runtime 成员齐备；源码构建模块仅复用官方包识别与复制边界，默认运行路径不调用其构建入口。预编译 receipt 覆盖前端、运行组件及复制的完整资源；共享 state 锁保护安装和启动核对。
+本地安装要求三个 runtime 成员齐备；源码构建模块仅复用官方包识别与复制边界，默认运行路径不调用其构建入口。预编译 receipt 覆盖前端、运行组件及复制的完整资源；共享 state 锁保护安装、更新下载、激活、卸载和启动核对；发行运行租约阻止删除正在使用的资源。
 
 ## 在线发行发现
 
@@ -58,3 +58,11 @@ python3 scripts/release_artifact.py sanitize \
 `bootstrap.sh` 与它取得的 `bootstrap.py` 是初始安装信任入口，来自用户选择的源码地址；它们尚无独立签名或固定外部信任摘要。shell 先检查 Python 3.9+ 和 macOS ARM64，再以 HTTPS 读取 Python 引导器；Python 在请求发行描述与归档前核对 codesign、完整官方包与资源。引导器也列入实际候选的摘要和隐私审查，但不能用归档自述的摘要反向证明最初下载的引导器身份。HTTPS 重定向不得降级到 HTTP。
 
 离线审查使用 `python3 scripts/install.py --archive FILE --sha256 SHA256`；在线审查使用 `python3 scripts/install.py --release-source URL`。`CODEX_CUSTOM_RELEASE_SOURCE` 覆盖默认发行根地址，`CODEX_CUSTOM_BOOTSTRAP_URL` 覆盖 shell 的 Python 引导器地址；仅 HTTPS 或 loopback HTTP 测试来源被允许。测试目录下放置 `official-0.164.0-aarch64-apple-darwin/release.json` 和 `codex-custom.tar.gz`，shell/Python 引导器可置于服务器根目录。这些选项不跳过任何归档或安装校验。
+
+## 静态扫描豁免的可复核来源
+
+扫描豁免只接受代码中十一项完整匹配内容的 SHA-256。四个 UUID 形状常量可在固定 Codex 提交 `6aaac694803004a63c6f393d153c96d22521a6b9` 的 `codex-rs/cloud-config/src/cache.rs`、`codex-rs/config/src/config_toml.rs`，以及 headers 0.4.1 的 `src/common/sec_websocket_accept.rs` 找到；用途分别为上游缓存完整性常量、公开配置示例和 WebSocket 协议 GUID。
+
+另外七项凭据正则命中跨越 Rust 合并静态字符串边界：`codex-rs/network-proxy/src/credential_broker/providers/` 的公开前缀分类器和环境变量名；`codex-rs/tui/src/history_cell/mcp.rs` 的标签与 `codex-rs/protocol/src/protocol.rs` 调试字段；`codex-rs/tui/src/bottom_pane/status_line_setup.rs` 的状态标识；`codex-rs/websocket-auth/src/lib.rs` 的四组 clap 帮助、参数名及紧邻静态错误消息。它们不被宣称为单一完整源文字串或可重现构建证明。
+
+复核时固定前端摘要，按相同正则在内存扫描，只输出规则、偏移、长度和匹配摘要；UUID 可与固定源码逐字节匹配，合并字符串则按源码常量与编译文本邻接关系检查。完整私有审阅笔记留在仓库外。新增不同匹配或前端来源变化必须重新审阅，不扩大为规则级豁免。

@@ -17,6 +17,7 @@ class DownloadTests(unittest.TestCase):
     setUp = fixtures.PrecompiledTests.setUp
     tool = fixtures.PrecompiledTests.tool
     archive = fixtures.PrecompiledTests.archive
+    local_command = fixtures.PrecompiledTests.command
 
     def service(self):
         folder = self.root / 'server'
@@ -55,6 +56,150 @@ class DownloadTests(unittest.TestCase):
         result = subprocess.run([str(self.bin / 'codex-custom'), 'resume', 'a b', '$(false)'], env=self.env, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)['args'], ['resume', 'a b', '$(false)'])
+
+    def test_explicit_custom_update_then_offline_launch(self):
+        folder, source = self.service()
+        release = self.publish(folder)
+        self.assertEqual(self.command(source).returncode, 0)
+        before = (self.root / 'state/current').readlink()
+        def change(payload):
+            manifest = json.loads(payload['release.json'])
+            manifest['release_id'] = 'fixture.2'
+            payload['release.json'] = json.dumps(manifest).encode()
+        args = self.archive(change)
+        (release / 'codex-custom.tar.gz').write_bytes(Path(args[1]).read_bytes())
+        descriptor = json.loads((release / 'release.json').read_text())
+        descriptor.update(release_id='fixture.2', sha256=args[-1])
+        (release / 'release.json').write_text(json.dumps(descriptor))
+        result = self.local_command('--update', '--release-source', source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotEqual((self.root / 'state/current').readlink(), before)
+        self.assertTrue((self.root / 'state' / before).exists())
+        env = dict(self.env, CODEX_CUSTOM_RELEASE_SOURCE='http://127.0.0.1:1')
+        result = subprocess.run([str(self.bin / 'codex-custom'), '--version'], env=env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_official_change_fetches_only_exact_release_and_preserves_old_on_failure(self):
+        folder, source = self.service()
+        self.publish(folder)
+        self.assertEqual(self.command(source).returncode, 0)
+        before = (self.root / 'state/current').readlink()
+        official_meta = self.official / 'codex-package.json'
+        meta = json.loads(official_meta.read_text())
+        meta['version'] = '0.165.0'
+        official_meta.write_text(json.dumps(meta))
+        (self.official / 'bin/codex').write_text('#!/bin/sh\necho codex-cli 0.165.0\n')
+        env = dict(self.env, CODEX_CUSTOM_RELEASE_SOURCE=source)
+        def launch():
+            return subprocess.run([str(self.bin / 'codex-custom'), '--version'], env=env, text=True, capture_output=True)
+        result = launch()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('use official codex', result.stderr)
+        self.assertEqual((self.root / 'state/current').readlink(), before)
+        def change(payload):
+            payload['bin/codex'] = payload['bin/codex'].replace(b'0.164.0', b'0.165.0')
+            manifest = json.loads(payload['release.json'])
+            manifest.update(official_version='0.165.0', release_id='fixture.2')
+            manifest['members']['bin/codex']['sha256'] = hashlib.sha256(payload['bin/codex']).hexdigest()
+            payload['release.json'] = json.dumps(manifest).encode()
+        args = self.archive(change)
+        release = folder / 'official-0.165.0-aarch64-apple-darwin'
+        release.mkdir()
+        (release / 'codex-custom.tar.gz').write_bytes(Path(args[1]).read_bytes())
+        descriptor = dict(schema=1, official_version='0.165.0', target='aarch64-apple-darwin', layout_version=1,
+                          release_id='fixture.2', archive='codex-custom.tar.gz', sha256=args[-1])
+        (release / 'release.json').write_text(json.dumps(descriptor))
+        result = launch()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotEqual((self.root / 'state/current').readlink(), before)
+        self.assertTrue((self.root / 'state' / before).exists())
+
+    def test_uninstall_cannot_overtake_pending_update_download(self):
+        folder, source = self.service()
+        self.publish(folder)
+        self.assertEqual(self.command(source).returncode, 0)
+        entered, release_response = threading.Event(), threading.Event()
+        class Delayed(http.server.SimpleHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+            def do_GET(self):
+                if self.path.endswith('.tar.gz'):
+                    entered.set()
+                    release_response.wait(10)
+                super().do_GET()
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(Delayed, directory=str(folder)))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        source = 'http://127.0.0.1:' + str(server.server_port)
+        child = subprocess.Popen([sys.executable, str(ROOT / 'scripts/install.py'), '--update', '--bin-dir', str(self.bin), '--release-source', source], env=self.env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            self.assertTrue(entered.wait(10))
+            result = self.local_command('--uninstall', '--purge')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('active', result.stderr)
+            self.assertTrue((self.bin / 'codex-custom').exists())
+        finally:
+            release_response.set()
+            stdout, stderr = child.communicate(timeout=15)
+        self.assertEqual(child.returncode, 0, stderr)
+        self.assertTrue((self.bin / 'codex-custom').exists())
+
+    def test_update_uses_new_downloaded_validator_not_old_import_cache(self):
+        folder, source = self.service()
+        release = self.publish(folder)
+        self.assertEqual(self.command(source).returncode, 0)
+        before = (self.root / 'state/current').readlink()
+        def change(payload):
+            name = 'runtime/release_artifact.py'
+            payload[name] += b"\ndef read_archive(path, expected_version='0.164.0'):\n    raise ReleaseError('new runtime validator rejected candidate')\n"
+            manifest = json.loads(payload['release.json'])
+            manifest['members'][name]['sha256'] = hashlib.sha256(payload[name]).hexdigest()
+            payload['release.json'] = json.dumps(manifest).encode()
+        args = self.archive(change)
+        (release / 'codex-custom.tar.gz').write_bytes(Path(args[1]).read_bytes())
+        descriptor = json.loads((release / 'release.json').read_text())
+        descriptor['sha256'] = args[-1]
+        (release / 'release.json').write_text(json.dumps(descriptor))
+        result = self.local_command('--update', '--release-source', source)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('new runtime validator', result.stderr)
+        self.assertEqual((self.root / 'state/current').readlink(), before)
+
+    def test_interrupted_update_preserves_activation_and_releases_management_lock(self):
+        folder, source = self.service()
+        self.publish(folder)
+        self.assertEqual(self.command(source).returncode, 0)
+        before = (self.root / 'state/current').readlink()
+        entered, release_response = threading.Event(), threading.Event()
+        class Delayed(http.server.SimpleHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+            def do_GET(self):
+                entered.set()
+                release_response.wait(10)
+                try:
+                    super().do_GET()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(Delayed, directory=str(folder)))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        source = 'http://127.0.0.1:' + str(server.server_port)
+        child = subprocess.Popen([str(self.bin / 'codex-custom'), '--update', '--release-source', source], env=self.env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            self.assertTrue(entered.wait(10))
+            child.terminate()
+            child.communicate(timeout=10)
+        finally:
+            release_response.set()
+            if child.poll() is None:
+                child.kill()
+                child.communicate()
+        self.assertEqual((self.root / 'state/current').readlink(), before)
+        self.assertTrue((self.bin / 'codex-custom').exists())
+        self.assertEqual(self.local_command('--uninstall').returncode, 0)
 
     def test_missing_official_helper_stops_before_any_network_request(self):
         (self.official / 'codex-path/rg').unlink()

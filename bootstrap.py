@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Download an exact compatible release and invoke its verified installer."""
 import sys
+sys.dont_write_bytecode = True
 if sys.version_info < (3, 9):
     sys.exit('Installation stopped: Python 3.9+ is required; use official codex')
 import argparse
@@ -53,8 +54,6 @@ def preflight():
     for item in root.rglob('*'):
         if item.is_symlink() and root not in item.resolve(strict=True).parents:
             raise ValueError('Official package contains an external resource link')
-    if version != '0.164.0':
-        raise ValueError('No supported precompiled release for official ' + version)
     return version
 
 
@@ -122,7 +121,7 @@ def unpack_runtime(archive, root, descriptor):
         (root / Path(name).name).write_bytes(payload[name])
 
 
-def download_and_install(source, bin_dir):
+def download_and_install(source, bin_dir, lock_held=False):
     version = preflight()
     source = checked_url(source.rstrip('/'))
     tag = 'official-' + version + '-aarch64-apple-darwin'
@@ -141,11 +140,30 @@ def download_and_install(source, bin_dir):
         if hashlib.sha256(archive.read_bytes()).hexdigest() != descriptor['sha256']:
             raise ValueError('Release archive SHA-256 mismatch')
         unpack_runtime(archive, root, descriptor)
-        sys.path.insert(0, str(root))
-        spec = importlib.util.spec_from_file_location('precompiled', root / 'precompiled.py')
-        installer = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(installer)
-        installer.install(archive, descriptor['sha256'], bin_dir, installer.state_dir())
+        # Running an installed updater already imported its own validator. Bind
+        # the freshly verified module only while loading this release's runtime;
+        # restore the caller's bindings afterward so versions cannot mix.
+        old_path = list(sys.path)
+        previous = sys.modules.get('release_artifact')
+        try:
+            sys.path.insert(0, str(root))
+            validator_spec = importlib.util.spec_from_file_location('release_artifact', root / 'release_artifact.py')
+            validator = importlib.util.module_from_spec(validator_spec)
+            validator_spec.loader.exec_module(validator)
+            sys.modules['release_artifact'] = validator
+            spec = importlib.util.spec_from_file_location('downloaded_precompiled', root / 'precompiled.py')
+            installer = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(installer)
+            try:
+                installer.install(archive, descriptor['sha256'], bin_dir, installer.state_dir(), lock_held=lock_held)
+            except validator.ReleaseError as error:
+                raise RuntimeError(str(error)) from error
+        finally:
+            sys.path[:] = old_path
+            if previous is None:
+                sys.modules.pop('release_artifact', None)
+            else:
+                sys.modules['release_artifact'] = previous
 
 
 def main(argv=None):

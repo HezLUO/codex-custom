@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 # Offline archive and online bootstrap share the release installer in precompiled.
-if '--archive' in sys.argv or '--launch' in sys.argv:
+if any(option in sys.argv for option in ('--archive', '--launch', '--uninstall', '--update')):
     from precompiled import main
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
