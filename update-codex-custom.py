@@ -78,20 +78,25 @@ def stage_package(official_root, binary, release):
     # A private parent without package metadata is skipped by the official pruner.
     package = official_root.parent / "codex-custom" / release.name / "package"
     package.parent.mkdir(parents=True, exist_ok=False)
-    shutil.copytree(official_root, package, symlinks=True)
-    if package_inventory(package) != before:
-        raise RuntimeError("Official package changed during copy")
-    # Unlink first: never write through a packaged symlink or retain old signing xattrs.
-    entrypoint = package / "bin/codex"
-    entrypoint.unlink()
-    shutil.copy2(binary, entrypoint)
-    (release / "package").symlink_to(package.resolve(), target_is_directory=True)
-    (release / "codex").symlink_to("package/bin/codex")
-    after = package_inventory(package)
-    if ({k: v for k, v in before.items() if k != "bin/codex"}
-            != {k: v for k, v in after.items() if k != "bin/codex"}):
-        raise RuntimeError("Packaged helpers or resources changed")
-    return after
+    try:
+        shutil.copytree(official_root, package, symlinks=True)
+        if package_inventory(package) != before:
+            raise RuntimeError("Official package changed during copy")
+        # Unlink first: never write through a packaged symlink or retain old signing xattrs.
+        entrypoint = package / "bin/codex"
+        entrypoint.unlink()
+        shutil.copy2(binary, entrypoint)
+        (release / "package").symlink_to(package.resolve(), target_is_directory=True)
+        (release / "codex").symlink_to("package/bin/codex")
+        after = package_inventory(package)
+        if ({k: v for k, v in before.items() if k != "bin/codex"}
+                != {k: v for k, v in after.items() if k != "bin/codex"}):
+            raise RuntimeError("Packaged helpers or resources changed")
+        return after
+    except BaseException:
+        # Exclusive mkdir succeeded: only this operation owns this directory.
+        shutil.rmtree(package.parent, ignore_errors=True)
+        raise
 
 
 def official_version():

@@ -92,9 +92,15 @@ def read_archive(path, expected_version='0.164.0'):
     except (tarfile.TarError, KeyError, TypeError, json.JSONDecodeError, UnicodeDecodeError) as error:
         raise ReleaseError('invalid release archive') from error
 
-def verify_binary(path, expected_version='0.164.0'):
+def verify_binary(path, expected_version='0.164.0', privacy_verified_sha256=None):
     data = Path(path).read_bytes()
-    privacy_check(data)
+    checksum = digest(data)
+    # Cached admission verdict is valid only for these exact bytes. Callers must
+    # first verify the receipt and all installed members; no CLI bypass exists.
+    if privacy_verified_sha256 is None:
+        privacy_check(data)
+    elif checksum != privacy_verified_sha256:
+        raise ReleaseError('frontend privacy verdict digest mismatch')
     if len(data) < 32 or data[:8] != bytes.fromhex('cffaedfe0c000001'):
         raise ReleaseError('frontend architecture must be thin Mach-O arm64')
     for command in (['codesign', '--verify', '--strict', str(path)], [str(Path(path).resolve()), '--version']):
@@ -106,7 +112,7 @@ def verify_binary(path, expected_version='0.164.0'):
     info = subprocess.run(['codesign', '-dv', str(path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if info.returncode or b'Signature=adhoc' not in info.stderr:
         raise ReleaseError('frontend signing policy mismatch')
-    return digest(data)
+    return checksum
 
 def sanitize_binary(source, output):
     """Redact home-prefix literals only in Mach-O constant data, then re-sign copy."""

@@ -125,7 +125,8 @@ def checked_release(state, release, owner):
             raise RuntimeError('Installed runtime integrity check failed')
     if receipt['package_inventory']['bin/codex']['sha256'] != manifest['members']['bin/codex']['sha256']:
         raise RuntimeError('Installed frontend digest mismatch')
-    artifact.verify_binary(target / 'bin/codex', manifest['official_version'])
+    artifact.verify_binary(target / 'bin/codex', manifest['official_version'],
+                           privacy_verified_sha256=manifest['members']['bin/codex']['sha256'])
     return receipt
 
 
@@ -180,6 +181,7 @@ def install(archive, checksum, bin_dir, state, lock_held=False):
             raise RuntimeError('Untrusted native custom package parent')
         package_path = root.parent / 'codex-custom' / release.name
         activated = False
+        created_package = False
         created_shim = False
         link = None
         try:
@@ -190,6 +192,7 @@ def install(archive, checksum, bin_dir, state, lock_held=False):
                 item.chmod(manifest['members'][name]['mode'])
             artifact.verify_binary(release / 'bin/codex', metadata['version'])
             copied = package.stage_package(root, release / 'bin/codex', release)
+            created_package = True
             receipt = dict(owner=OWNER, installation_id=installation_id, state=str(state), manifest=manifest, official_root=str(root), official_metadata=metadata,
                            official_inventory=inventory, package_inventory=copied)
             (release / 'receipt.json').write_text(json.dumps(receipt, sort_keys=True) + '\n')
@@ -217,7 +220,8 @@ def install(archive, checksum, bin_dir, state, lock_held=False):
                 if not owner:
                     (state / 'owner.json').unlink(missing_ok=True)
                 shutil.rmtree(release, ignore_errors=True)
-                shutil.rmtree(package_path, ignore_errors=True)
+                if created_package:
+                    shutil.rmtree(package_path, ignore_errors=True)
                 if not owner:
                     # Only remove our now-empty container; never sweep unknown state.
                     try:
@@ -271,7 +275,11 @@ def uninstall(state, bin_dir, purge=False):
                 (state / 'current').unlink(missing_ok=True)
                 for release in releases:
                     target = (release / 'package').resolve(strict=True)
-                    shutil.rmtree(target.parent)
+                    shutil.rmtree(target)
+                    try:
+                        target.parent.rmdir()
+                    except OSError:
+                        pass  # Unreceipted siblings remain owned by their creator.
                     shutil.rmtree(release)
                 print('Owned releases removed; ownership marker and lock retained; other data preserved')
             else:
@@ -348,24 +356,26 @@ def launch(state, arguments):
             raise RuntimeError('No managed installation')
         return main(['--bin-dir', str(Path(owner['launcher']).parent), *arguments])
     official = preflight()
-    with locked(state):
-        release, receipt = checked_current(state)
-        matches = (receipt['official_root'], receipt['official_metadata'], receipt['official_inventory']) == (str(official[0]), official[1], official[2])
-    if not matches:
-        owner = owner_receipt(state)
+    for attempt in range(2):
+        with locked(state):
+            release, receipt = checked_current(state)
+            matches = (receipt['official_root'], receipt['official_metadata'], receipt['official_inventory']) == (str(official[0]), official[1], official[2])
+            if matches:
+                if preflight() != official:
+                    raise RuntimeError('Official package changed before launch; retry')
+                binary = release / 'package/bin/codex'
+                environment = dict(os.environ)
+                environment.setdefault('CODEX_CUSTOM_STATUS_LINE', STATUS)
+                if (release / 'run.lock').is_symlink():
+                    raise RuntimeError('Untrusted run lease')
+                lease = (release / 'run.lock').open('a')
+                fcntl.flock(lease, fcntl.LOCK_SH)
+                break
+            owner = owner_receipt(state)
+        if attempt:
+            raise RuntimeError('Official package changed; matching precompiled release required')
         update(state, Path(owner['launcher']).parent, None)
         official = preflight()
-    with locked(state):
-        release, receipt = checked_current(state, official)
-        if preflight() != official:
-            raise RuntimeError('Official package changed before launch; retry')
-        binary = release / 'package/bin/codex'
-        environment = dict(os.environ)
-        environment.setdefault('CODEX_CUSTOM_STATUS_LINE', STATUS)
-        if (release / 'run.lock').is_symlink():
-            raise RuntimeError('Untrusted run lease')
-        lease = (release / 'run.lock').open('a')
-        fcntl.flock(lease, fcntl.LOCK_SH)
     return supervise(binary, arguments, environment, lease)
 
 
