@@ -78,6 +78,13 @@ def replace(source, destination):
         raise PermissionError('fixture activation denied')
     return original_replace(source, destination)
 os.replace = replace
+original_mkdir = Path.mkdir
+def mkdir(path, *args, **kwargs):
+    if os.environ.get('FIXTURE_NATIVE_COLLISION') and path.parent.name == 'codex-custom' and not path.exists():
+        original_mkdir(path, parents=True)
+        (path / 'foreign-sentinel').write_text('foreign installation')
+    return original_mkdir(path, *args, **kwargs)
+Path.mkdir = mkdir
 """)
         self.env['PYTHONPATH'] = str(adapter)
 
@@ -118,6 +125,18 @@ os.replace = replace
         self.assertEqual(value['args'], ['resume', 'a b', '$(false)'])
         self.assertIn('context-details', value['status'])
 
+    def test_offline_launch_validates_signature_once_and_rejects_invalid_signature(self):
+        self.assertEqual(self.command(*self.archive()).returncode, 0)
+        counter = self.root / 'signature-checks'
+        self.tool('codesign', '#!/bin/sh\ncase "$1" in --verify) echo verify >> "$FIXTURE_SIGNATURE_CHECKS";; -dv) echo Signature=adhoc >&2;; esac\n')
+        result = subprocess.run([str(self.bin / 'codex-custom'), '--version'], env=dict(self.env, FIXTURE_SIGNATURE_CHECKS=str(counter)), capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(counter.read_text().splitlines(), ['verify'])
+        self.tool('codesign', '#!/bin/sh\nexit 1\n')
+        result = subprocess.run([str(self.bin / 'codex-custom'), '--version'], env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('signature or version verification failed', result.stderr)
+
     def test_repeat_install_and_custom_status_preserve_official_resources(self):
         before = (self.official / 'bin/codex').read_bytes()
         args = self.archive()
@@ -140,6 +159,16 @@ os.replace = replace
         self.assertIn('archive member rejected', result.stderr)
         self.assertEqual((self.root / 'state/current').readlink(), active)
         self.assertFalse((self.root / 'escape').exists())
+
+    def test_native_package_collision_preserves_foreign_directory(self):
+        args = self.archive()
+        self.env['FIXTURE_NATIVE_COLLISION'] = '1'
+        result = self.command(*args)
+        self.assertNotEqual(result.returncode, 0)
+        sentinels = list((self.official.parent / 'codex-custom').glob('*/foreign-sentinel'))
+        self.assertEqual(len(sentinels), 1)
+        self.assertEqual(sentinels[0].read_text(), 'foreign installation')
+        self.assertFalse((self.bin / 'codex-custom').exists())
 
     def test_foreign_command_and_broken_link_are_preserved(self):
         args = self.archive()
@@ -226,6 +255,18 @@ os.replace = replace
         self.assertEqual((other / 'keep').read_text(), 'other installation')
         self.assertTrue((self.official / 'bin/codex').exists())
         self.assertEqual(self.command('--uninstall', '--purge').returncode, 0)
+
+    def test_cleanup_preserves_unreceipted_native_package_sibling(self):
+        self.assertEqual(self.command(*self.archive()).returncode, 0)
+        current = (self.root / 'state/current').resolve()
+        target = (current / 'package').resolve()
+        sentinel = target.parent / 'unmanaged-notes.txt'
+        sentinel.write_text('unrelated notes')
+        result = self.command('--uninstall', '--purge')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(target.exists())
+        self.assertFalse(current.exists())
+        self.assertEqual(sentinel.read_text(), 'unrelated notes')
 
     def test_cleanup_refuses_running_session_and_foreign_receipt_without_deletion(self):
         import time
