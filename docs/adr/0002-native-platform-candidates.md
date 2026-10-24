@@ -5,10 +5,10 @@
 | 平台 | 精确发行 target | 原生 GitHub runner | 当前实测状态 |
 | --- | --- | --- | --- |
 | Apple Silicon Mac | aarch64-apple-darwin | macos-15 | 既有 `.7` 候选已验证；新运行组件另行验收 |
-| Intel Mac | x86_64-apple-darwin | macos-15-intel | 待原生构建与验收 |
+| Intel Mac | x86_64-apple-darwin | macos-15-intel | [原生构建、隔离生命周期及成品复核通过](https://github.com/HezLUO/codex-custom/actions/runs/40102972110) |
 | Linux x64 | x86_64-unknown-linux-musl | ubuntu-24.04 | [原生构建、隔离生命周期及成品复核通过](https://github.com/HezLUO/codex-custom/actions/runs/40088351134) |
 | Linux ARM64 | aarch64-unknown-linux-musl | ubuntu-24.04-arm | [原生构建、隔离生命周期及成品复核通过](https://github.com/HezLUO/codex-custom/actions/runs/40088705811) |
-| Windows x64 | x86_64-pc-windows-msvc | windows-2022 | 待原生构建与验收 |
+| Windows x64 | x86_64-pc-windows-msvc | windows-2022 | [固定编译产物、新安装及旧候选升级生命周期通过](https://github.com/HezLUO/codex-custom/actions/runs/40129684969) |
 
 平台范围来自用户选择：Intel Mac、Linux 和 Windows 都增加。Windows ARM64、Linux 32 位和任意 Linux 发行版的兼容保证不在本轮声明内。Linux 主程序使用与官方发行相同的 MUSL target；官方 voice 仍依赖 GNU/glibc 环境，不能据此声称支持全部 MUSL-only 系统。
 
@@ -39,3 +39,6 @@ Windows 使用拥有明确归属的 `.cmd` 启动器和原子替换的 `current.
 实现依据：[固定上游 target 定义](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/scripts/codex_package/targets.py)、[完整包布局](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/scripts/codex_package/layout.py)、[Linux bwrap 校验](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-rs/linux-sandbox/src/bundled_bwrap.rs)、[voice 外层清单](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/third_party/voice/assemble_package.py)、[Windows 官方安装器](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/scripts/install/install.ps1)、[GitHub runner 配置](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)。
 
 原生测试已经在固定输入上通过、且修复只涉及 Python 准入时，可以显式开启默认关闭的测试证据复用。记录严格绑定特定已复核任务、Rust 源码及补丁、工具链、实际编译准备/执行代码、锁文件规范化模块、完整已审查 workflow 与 runner image；任一绑定不符便停止复用。新 CLI 仍实际编译并进行全部准入与生命周期检查。provenance 区分本轮测试执行与引用既有原生结果；此优化不扩大安装或交互验收声明。
+
+
+Windows 卸载修复仅刷新 Python 运行组件，复用 `40103098988` 的实际编译前端及原始通知。独立 `Verify existing Windows candidate` 仅具有 contents/actions 读取权限，固定原 run 与归档 SHA-256；不安装 Rust 工具链或重新编译。新版单行 `.cmd` 先退出批处理上下文再调用 Python，防止自删除后的文件读取覆盖退出码；既有入口只允许完整旧格式及同一收据归属，原子迁移并在失败时恢复，未知替换内容保留。最终原生验收同时覆盖新安装和通过原候选自身组件升级，详细来源、摘要及限制见验证记录。

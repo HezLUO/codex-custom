@@ -1,6 +1,6 @@
 # 本地预编译候选格式
 
-`python3 scripts/release_artifact.py package` 从单个前端、独立来源记录及依赖通知生成 tar.gz 与 SHA-256 文件。归档外保留原始证据，不能把现有安装目录作为输入目录。`inspect` 检查归档结构、隐私规则、元数据与逐文件摘要，不执行归档中的程序；安装器必须在独立暂存目录另行调用 `verify_binary`，在对应原生平台核对 Mach-O / ELF / PE 架构及 `codex-cli 0.164.0`，macOS 另核对严格 ad hoc 签名。其他平台尚待真实构建验收，见[平台决定](adr/0002-native-platform-candidates.md)。
+`python3 scripts/release_artifact.py package` 从单个前端、独立来源记录及依赖通知生成 tar.gz 与 SHA-256 文件。归档外保留原始证据，不能把现有安装目录作为输入目录。`inspect` 检查归档结构、隐私规则、元数据与逐文件摘要，不执行归档中的程序；安装器必须在独立暂存目录另行调用 `verify_binary`，在对应原生平台核对 Mach-O / ELF / PE 架构及 `codex-cli 0.164.0`，macOS 另核对严格 ad hoc 签名。四个新增平台的原生构建及安装生命周期已通过，具体限制见[平台决定](adr/0002-native-platform-candidates.md)。
 
 ```sh
 python3 scripts/release_artifact.py package \

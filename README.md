@@ -15,19 +15,19 @@ Context 95% left (33.8K used / 475K)
 ## 支持范围
 
 - 已有运行验收：macOS Apple Silicon，官方 CLI **0.164.0**，官方 standalone `codex` 包布局 v1。
-- Linux x64/ARM64 已完成原生 CI 构建与隔离安装生命周期验收，成品下载后的独立检查也通过；仍是尚未正式发布的候选，未覆盖完整 TUI、voice 或所有 Linux 发行版。
-- Intel Mac、Windows x64 尚待原生构建验收；npm/Homebrew 布局尚未支持。官方版本变化后仅取得明确匹配的发行；尚无发行便停止。未来版本须由维护者移植与验收，不宣称已有真实兼容。
+- Intel Mac、Linux x64/ARM64、Windows x64 已完成原生构建与隔离安装生命周期验收，成品下载后的独立检查也通过；仍是尚未正式发布的候选，未覆盖完整 TUI、voice、Windows 普通权限控制台或所有 Linux 发行版。
+- npm/Homebrew 布局尚未支持。官方版本变化后仅取得明确匹配的发行；尚无发行便停止。未来版本须由维护者移植与验收，不宣称已有真实兼容。
 - 默认预编译安装需要 Python 3.9+ 和匹配官方包；macOS 另需系统 codesign；无需 Rust、Cargo、Git 或源码目录。官方包必须位于当前 `CODEX_HOME`（默认 `~/.codex`）的 `packages/standalone/releases` 中。
 - 显式开发者源码构建还需要 Git、Xcode Command Line Tools（含 `strip`、`codesign`）、通过 rustup 安装的 `cargo` 和 `rustup`（在 PATH 中），以及下载上游源码和 Rust 依赖的网络。
 - 更新器根据匹配版本源码的 `codex-rs/rust-toolchain.toml` 安装工具链。0.164.0 使用 Rust 1.99.1。首次构建为大型 Rust 工作区的优化构建，预留数十 GB 空间和较长编译时间；具体开销随机器、缓存而异，尚无全新环境基准。
 
-## 正在准备的其他平台
+## 其他平台候选
 
-新增候选目标为 Intel Mac、Linux x64/ARM64 和 Windows x64，详见[平台决定及验收边界](docs/adr/0002-native-platform-candidates.md)。Linux x64/ARM64 已通过原生构建、隐私与许可文本检查、安装、更新、离线启动、实际 bwrap 执行和卸载验收；Intel Mac 与 Windows 仍在构建验证。所有候选均未正式发布。
+新增候选目标为 Intel Mac、Linux x64/ARM64 和 Windows x64，详见[平台决定及验收边界](docs/adr/0002-native-platform-candidates.md)。四个新增目标均通过原生构建、隐私与许可文本检查、安装、更新、离线启动和卸载验收；Linux 另通过实际 bwrap 执行，Windows 另通过原候选到修正版的真实升级。所有候选均未正式发布。
 
-维护者可在 GitHub 仓库手动运行 `Build platform candidates`。它固定上游源码、工具链及官方资源，在对应系统构建，并在临时目录安装、更新、离线启动和卸载；Linux 另检查沙箱。缺失许可文本阻止打包。构建日志及候选产物在公开仓库中可见；流程不创建正式 Release。构建工具需要 Python 3.12+；普通用户仍只需 Python 3.9+，不编译 Rust。显式开发者源码构建入口仍限原有 macOS Apple Silicon 流程。
+维护者可在 GitHub 仓库手动运行 `Build platform candidates`。它固定上游源码、工具链及官方资源，在对应系统构建，并在临时目录安装、更新、离线启动和卸载；Linux 另检查沙箱。缺失许可文本阻止打包。构建日志及候选产物在公开仓库中可见；流程不创建正式 Release。构建工具需要 Python 3.12+；普通用户仍只需 Python 3.9+，不编译 Rust。显式开发者源码构建入口仍限原有 macOS Apple Silicon 流程。 Windows 的 `Verify existing Windows candidate` 可固定复用已审查的编译产物，仅更新 Python 组件并重跑原生验收；其来源与不重编译证明见[验证记录](docs/VALIDATION.md)。
 
-Windows 成品就绪并发布后，预期使用 PowerShell：
+Windows 成品正式发布后，预期使用 PowerShell：
 
 ```powershell
 irm https://raw.githubusercontent.com/HezLUO/codex-custom/main/bootstrap.ps1 | iex
@@ -43,7 +43,7 @@ irm https://raw.githubusercontent.com/HezLUO/codex-custom/main/bootstrap.ps1 | i
 curl -fsSL https://raw.githubusercontent.com/HezLUO/codex-custom/main/bootstrap.sh | sh
 ```
 
-要求 Python 3.9+、macOS Apple Silicon、系统 codesign 与完整匹配的官方 standalone CLI 0.164.0；普通用户无需 Rust、Cargo 或 Git。shell 在下载 Python 引导器前检查 Python 与系统；Python 在下载发行前检查官方包和资源。安装器只选择明确绑定官方版本与平台的 tag，从不盲用 latest。初始 shell/Python 引导器由所选源码地址提供，属于安装信任入口；HTTPS 和同源摘要不等于独立发布者签名，详见[产物格式与验证边界](docs/PRECOMPILED-FORMAT.md)。
+要求 Python 3.9+、macOS Apple Silicon/Intel 或 Linux x64/ARM64，以及完整匹配的官方 standalone CLI 0.164.0；macOS 另需系统 codesign；普通用户无需 Rust、Cargo 或 Git。shell 在下载 Python 引导器前检查 Python 与系统；Python 在下载发行前检查官方包和资源。安装器只选择明确绑定官方版本与平台的 tag，从不盲用 latest。初始 shell/Python 引导器由所选源码地址提供，属于安装信任入口；HTTPS 和同源摘要不等于独立发布者签名，详见[产物格式与验证边界](docs/PRECOMPILED-FORMAT.md)。
 
 在已下载的源码候选中可运行 `python3 scripts/install.py`；它走相同在线下载与统一安装过程。安装成功后运行 `codex-custom --version` 或 `codex-custom`；若命令目录不在 PATH 中，使用完整入口路径。未知发行、网络中断、错误摘要或签名均停止并保留原有效安装，使用官方 `codex` 恢复工作。没有隐式源码构建。
 
@@ -161,4 +161,4 @@ python3 scripts/audit-release.py
 
 ## 许可与归属
 
-候选项目采用 Apache-2.0，见 [LICENSE](LICENSE)。补丁包含来自 OpenAI Codex 的上下文，保留上游 [NOTICE](NOTICE)；修改说明见 [维护说明](docs/MAINTENANCE.md)。上游源码为 [openai/codex](https://github.com/openai/codex)，基线 tag 为 `rust-v0.164.0`。许可证及通知保留方案依据 [Apache-2.0 第 4 节](https://www.apache.org/licenses/LICENSE-2.0)。已有 Apple Silicon 候选已附依赖通知并完成本地检查；此前四项 MIT 依赖已完成来源复核，三项补入上游原文，另一项保留已发布作者及完整条款并明确来源限制。新增平台的依赖通知仍需按实际构建复核。ad hoc 签名不认证发布者、未公证。源码审计和本地验收均不代表公开发布授权。
+候选项目采用 Apache-2.0，见 [LICENSE](LICENSE)。补丁包含来自 OpenAI Codex 的上下文，保留上游 [NOTICE](NOTICE)；修改说明见 [维护说明](docs/MAINTENANCE.md)。上游源码为 [openai/codex](https://github.com/openai/codex)，基线 tag 为 `rust-v0.164.0`。许可证及通知保留方案依据 [Apache-2.0 第 4 节](https://www.apache.org/licenses/LICENSE-2.0)。已有 Apple Silicon 候选已附依赖通知并完成本地检查；此前四项 MIT 依赖已完成来源复核，三项补入上游原文，另一项保留已发布作者及完整条款并明确来源限制。新增平台已按实际目标构建复核许可清单，未发现原始文本缺项；来源限制仍见验证记录。ad hoc 签名不认证发布者、未公证。源码审计和本地验收均不代表公开发布授权。
