@@ -139,11 +139,25 @@ RULES = {
     'windows-home-path-utf16': rb'(?i)[a-z]\x00:\x00[\\/]\x00U\x00s\x00e\x00r\x00s\x00[\\/]\x00',
     'machine-temporary-path': rb'/(?:private/)?var/folders/[^\s\x00]+',
     'private-key': rb'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',
-    'credential': rb'(?i)(?:sk-[a-z0-9_-]{20,}|gh[pousr]_[a-z0-9]{20,}|AKIA[A-Z0-9]{16}|Bearer\s+[a-z0-9._-]{20,})',
+    'credential': rb'(?i)(?<![a-z0-9_-])(?:sk-[a-z0-9_-]{20,}|gh[pousr]_[a-z0-9]{20,}|AKIA[A-Z0-9]{16}|Bearer\s+[a-z0-9._-]{20,})',
     'session-identifier': rb'(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b',
 }
 # Static upstream literals can be reviewed by SHA-256, never raw sensitive values.
 REVIEWED_LITERALS = {
+    # Public websocket-auth CLI help merged with its clap argument metadata.
+    # Pinned upstream codex-rs/websocket-auth/src/lib.rs:56-57; no secret value.
+    '670faf85aaeed7e56aa3fe7a2fba71e4a98d328ffc2c83d56a2a000f788100c8',
+    '846feea5ac25e23d05d7f23126d0f9cc1277920d1aaa9ec2ba72adf93b7970bd',
+    '0ed6536aea536dae2f497b956167afe4979225ba93b487312ad23f308500fde8',
+    # Pinned network-proxy credential_broker/providers/openai.rs contains public
+    # detector prefixes/watermark, not complete keys. Rust merges adjacent text.
+    '04ae2ad0094fd00723d8932b7df490fff1e6584f22afba63d7e23304e48754b0',
+    '8028bd5239cae61a1ac91c401977eb1a24b3bc7c43b97945cef38ab7fa4846af',
+    # Public mxc-sdk learning_mode_windows/network_extractors.rs constants:
+    # provider, sublayer and Windows app-isolation identifiers, not sessions.
+    '7072290eb10f53ac323515f5fc18c259e24dcabe48f877150b4c665f6f3ad244',
+    'be1bef2417a938043e410c938f8a580690835810776f7437dab1799788515adc',
+    '7f14466df9323c3c1ef44fdd7124a57ffa807b0c7d4ba6ec314cdd4c24eaed64',
     '00bce46225b668d670f4ae8a3d3cc4e3279c07d75aefaad5837811a45b8aba02',
     '197d1ddc4ccb013d0e9948f5093f179fd0ff7d26158ba8a01cf3aff3b2097eb9',
     '2b4b584391bdaafc432e211fdc2b09498be570753795cf88d7cf36f0ea6bdf81',

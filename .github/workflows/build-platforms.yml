@@ -56,7 +56,7 @@ jobs:
         run: python scripts/build-platform.py prepare --source upstream --work "$RUNNER_TEMP/custom-build"
       - name: Rust toolchain
         run: |
-          rustup toolchain install 1.99.1 --profile minimal
+          rustup toolchain install 1.99.1 --profile minimal --component rust-docs
           rustup target add --toolchain 1.99.1 "$TARGET"
       - name: Linux native MUSL tools
         if: runner.os == 'Linux'
@@ -99,5 +99,6 @@ jobs:
           path: |
             dist/license-review.json
             dist/acceptance.json
+            dist/privacy-review.json
           if-no-files-found: ignore
           retention-days: 7

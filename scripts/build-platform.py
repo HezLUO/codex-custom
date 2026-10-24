@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tarfile
@@ -218,6 +219,83 @@ def collect_notices(metadata, source, out, target):
     return report
 
 
+def redact_build_paths(binary, target, prefixes):
+    """Replace known CI prefixes only inside non-executable constant sections.
+
+    Preserve length, offsets and all other bytes. Unknown path/credential matches
+    still fail the ordinary artifact admission check. Never patch instructions.
+    """
+    data = bytearray(binary.read_bytes())
+    portable.check_architecture(data, target)
+    regions = []
+    if 'linux' in target:
+        table = struct.unpack_from('<Q', data, 40)[0]
+        size, count = struct.unpack_from('<HH', data, 58)
+        if size != 64 or table + size * count > len(data):
+            raise RuntimeError('Invalid ELF section table')
+        for i in range(count):
+            _, kind, flags, _, offset, length = struct.unpack_from('<IIQQQQ', data, table + i * size)
+            if kind == 1 and flags & 2 and not flags & 5:
+                regions.append((offset, offset + length))
+    elif target.endswith('apple-darwin'):
+        count = struct.unpack_from('<I', data, 16)[0]; cursor = 32
+        for _ in range(count):
+            command, size = struct.unpack_from('<II', data, cursor)
+            if size < 8 or cursor + size > len(data):
+                raise RuntimeError('Invalid Mach-O load command')
+            if command == 0x19:
+                sections = struct.unpack_from('<I', data, cursor + 64)[0]
+                if 72 + 80 * sections > size: raise RuntimeError('Invalid Mach-O sections')
+                for i in range(sections):
+                    section = cursor + 72 + i * 80
+                    name = bytes(data[section:section + 16]).rstrip(b'\0')
+                    segment = bytes(data[section + 16:section + 32]).rstrip(b'\0')
+                    length = struct.unpack_from('<Q', data, section + 40)[0]
+                    offset = struct.unpack_from('<I', data, section + 48)[0]
+                    if segment == b'__TEXT' and name in (b'__cstring', b'__const'):
+                        regions.append((offset, offset + length))
+            cursor += size
+    else:
+        pe = struct.unpack_from('<I', data, 60)[0]
+        count = struct.unpack_from('<H', data, pe + 6)[0]
+        optional = struct.unpack_from('<H', data, pe + 20)[0]
+        table = pe + 24 + optional
+        if table + count * 40 > len(data): raise RuntimeError('Invalid PE sections')
+        for i in range(count):
+            section = table + i * 40
+            length, offset = struct.unpack_from('<II', data, section + 16)
+            flags = struct.unpack_from('<I', data, section + 36)[0]
+            if flags & 0x40000040 == 0x40000040 and not flags & 0xa0000000:
+                regions.append((offset, offset + length))
+    if any(start < 0 or end > len(data) for start, end in regions):
+        raise RuntimeError('Invalid constant-section bounds')
+    replacements = {}
+    for prefix in prefixes:
+        raw = str(prefix).encode('utf-8')
+        if len(raw) < 8: raise RuntimeError('Build prefix too short to sanitize safely')
+        for value in {raw, raw.replace(b'\\', b'/'), raw.replace(b'\\', b'\\\\')}:
+            neutral = b'/build/' + b'_' * (len(value) - 7)
+            replacements[value] = neutral
+            if portable.windows(target):
+                replacements[value.decode().encode('utf-16-le')] = neutral.decode().encode('utf-16-le')
+    edits = []
+    for prefix, replacement in sorted(replacements.items(), key=lambda item: -len(item[0])):
+        for match in re.finditer(re.escape(prefix), data):
+            start, end = match.span()
+            # A prefix must end at a path component boundary, never inside a name.
+            suffix = bytes(data[end:end + 2])
+            if suffix[:1] not in (b'/', b'\\', b'\0'):
+                continue
+            if not any(a <= start and end <= b for a, b in regions):
+                raise RuntimeError('Build path lies outside approved constant sections')
+            if not any(a < end and start < b for a, b, _ in edits):
+                edits.append((start, end, replacement))
+    for start, end, replacement in edits:
+        data[start:end] = replacement
+    binary.write_bytes(data)
+    return len(edits)
+
+
 def build(source, work, out, target):
     import tomllib
     if run(['git', 'rev-parse', 'HEAD'], source, True).strip() != COMMIT or run(['git', 'status', '--porcelain'], source, True).strip():
@@ -244,24 +322,51 @@ def build(source, work, out, target):
     spec = importlib.util.spec_from_file_location('updater', ROOT / 'update-codex-custom.py')
     updater = importlib.util.module_from_spec(spec); spec.loader.exec_module(updater)
     updater.normalize_local_lock_versions(rust, metadata, run(['git', 'show', 'HEAD:codex-rs/Cargo.lock'], source, True))
-    for name in TESTS:
-        result = run([*cargo, 'test', '--locked', '--release', '--target', target, '-p', 'codex-tui', '--lib', name], rust, True)
-        if not re.search(r'test result: ok\. [1-9][0-9]* passed', result): raise RuntimeError('Targeted tests did not pass: ' + name)
-    run([*cargo, 'build', '--locked', '--release', '--target', target, '-p', 'codex-cli', '--bin', 'codex'], rust)
-    binary = Path(os.environ['CARGO_TARGET_DIR']) / target / 'release' / ('codex.exe' if portable.windows(target) else 'codex')
-    if target.endswith('apple-darwin'):
-        run(['strip', '-S', '-x', binary]); run(['codesign', '--force', '--sign', '-', binary])
-    elif 'linux' in target:
-        run(['strip', '--strip-debug', '--strip-unneeded', binary])
-    artifact.verify_binary(binary, target=target)
-    run([binary, '--help'], capture=True)
     out.mkdir(parents=True, exist_ok=False)
     metadata = json.loads(run([*cargo, 'metadata', '--locked', '--format-version', '1', '--filter-platform', target], rust, True))
     report = collect_notices(metadata, source, out, target)
-    # Unknown missing license texts cannot become an installable release silently.
     if report['missing_original_texts']:
-        raise RuntimeError('Target notice review has unresolved original texts; inspect license-review.json before packaging')
+        raise RuntimeError('Target notice review has unresolved original texts; inspect license-review.json before compiling')
+    for name in TESTS:
+        result = run([*cargo, 'test', '--locked', '--release', '--target', target, '-p', 'codex-tui', '--lib', name], rust, True)
+        summary = re.search(r'test result: ok\. [1-9][0-9]* passed', result)
+        if not summary: raise RuntimeError('Targeted tests did not pass: ' + name)
+        print('Native test ' + name + ': ' + summary.group(), flush=True)
+    run([*cargo, 'build', '--locked', '--release', '--target', target, '-p', 'codex-cli', '--bin', 'codex'], rust)
+    binary = Path(os.environ['CARGO_TARGET_DIR']) / target / 'release' / ('codex.exe' if portable.windows(target) else 'codex')
+    if target.endswith('apple-darwin'):
+        run(['strip', '-S', '-x', binary])
+    elif 'linux' in target:
+        run(['strip', '--strip-debug', '--strip-unneeded', binary])
+    # Static V8/native archives can retain their original public CI paths even
+    # when Rust and C compiler prefix remapping is enabled for this checkout.
+    prefixes = {str(Path.home()), '/home/' + 'runner', '/Users/' + 'runner'}
+    if portable.windows(target):
+        # OpenSSL's published Windows objects retain a DOS short CI home path.
+        prefixes.add('C:' + '\\Users' + '\\RUNNER~1')
+    redactions = redact_build_paths(binary, target, prefixes)
+    if target.endswith('apple-darwin'):
+        run(['codesign', '--force', '--sign', '-', binary])
+    try:
+        artifact.verify_binary(binary, target=target)
+    except artifact.ReleaseError:
+        # Preserve a redacted diagnostic if admission fails; never upload the
+        # unreviewed binary or matching private values to the public repository.
+        data = binary.read_bytes(); findings = {}
+        for label, pattern in artifact.RULES.items():
+            for match in re.finditer(pattern, data):
+                checksum = artifact.digest(match.group())
+                if checksum not in artifact.REVIEWED_LITERALS:
+                    key = (label, checksum, len(match.group()))
+                    findings[key] = findings.get(key, 0) + 1
+        diagnostic = dict(status='blocked', binary_sha256=artifact.digest(data), findings=[
+            dict(rule=label, sha256=checksum, size=size, count=count)
+            for (label, checksum, size), count in sorted(findings.items())])
+        (out / 'privacy-review.json').write_text(json.dumps(diagnostic, indent=2), encoding='utf-8')
+        raise
+    run([binary, '--help'], capture=True)
     provenance = dict(binary_sha256=artifact.digest(binary.read_bytes()), build_action='native clean CI build',
+                      build_path_redactions=redactions,
                       toolchain=TOOLCHAIN, target=target, tests=TESTS, upstream_commit=COMMIT,
                       official_package_sha256=os.environ['CODEX_CUSTOM_CI_OFFICIAL_SHA256'],
                       distribution_review={'status': 'target-source-review-required', 'dependency_notice_sha256': artifact.digest((out / 'DEPENDENCY-NOTICES.txt').read_bytes())})
