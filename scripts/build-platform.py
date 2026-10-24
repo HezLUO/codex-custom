@@ -331,10 +331,12 @@ def rust_test_inputs(source_text):
 def native_test_evidence(target, source_text=None, patch_bytes=None, *, updater_bytes=None,
                          workflow_bytes=None, image_version=None):
     # Reviewed completed native jobs, each with 2+20+9+37+7 passing tests.
-    jobs = {'x86_64-unknown-linux-musl': 120833295662,
+    jobs = {'x86_64-apple-darwin': 120833295709,
+            'x86_64-unknown-linux-musl': 120833295662,
             'aarch64-unknown-linux-musl': 120833295563,
             'x86_64-pc-windows-msvc': 120833295631}
-    images = {'x86_64-unknown-linux-musl': '20261012.334.1',
+    images = {'x86_64-apple-darwin': '20260824.0482.1',
+              'x86_64-unknown-linux-musl': '20261012.334.1',
               'aarch64-unknown-linux-musl': '20261012.149.1',
               'x86_64-pc-windows-msvc': '20261022.344.1'}
     expected_inputs = '630b8cf18218151cb4da2761dc0945aa07b9ec1b1d3d9d1962125135d1128d5c'

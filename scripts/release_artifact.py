@@ -144,6 +144,11 @@ RULES = {
 }
 # Static upstream literals can be reviewed by SHA-256, never raw sensitive values.
 REVIEWED_LITERALS = {
+    # Intel Mac public TUI, CLI and protocol/error names merged by the linker.
+    # Every byte matches the fixed official frontend or published patched source.
+    '605fa780f11cc4fe5e9b4b22324dbe97795afed1a3871a6dba61d369e9760962',
+    '6eda4032513c88c78ae8b8af9eb73fbb45c5f07ffc25b0d32af1f67c3129e2ef',
+    '9923bedd0c1ddb364231da11e105251611cd86cf1167fd3ee89615bc22340daf',
     # Native Linux x64/ARM64: public MCP authentication labels and enum metadata;
     # public status-line fields plus the context-details patch. Every byte was
     # matched to the fixed official frontend or published source before review.
