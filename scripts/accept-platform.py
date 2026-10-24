@@ -22,7 +22,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def launcher_command(launcher, arguments, windows):
     if windows:
-        return ['cmd.exe', '/d', '/s', '/c', '"' + subprocess.list2cmdline([str(launcher), *arguments]) + '"']
+        # Pass one native command line: a Python argv list would escape these
+        # quotes again before cmd.exe receives them. Smoke arguments are fixed.
+        return 'cmd.exe /d /s /c "' + subprocess.list2cmdline([str(launcher), *arguments]) + '"'
     return [launcher, *arguments]
 
 
@@ -58,7 +60,8 @@ def main():
             baseline = updater.package_inventory(official); config_before = (ch / 'config.toml').read_bytes()
             commands = root / 'commands'; launcher = commands / ('codex-custom.cmd' if portable.windows() else 'codex-custom')
             def call(command):
-                result = subprocess.run(list(map(str, command)), env=environment, cwd=work, capture_output=True, timeout=180)
+                native_command = command if isinstance(command, str) else list(map(str, command))
+                result = subprocess.run(native_command, env=environment, cwd=work, capture_output=True, timeout=180)
                 if result.returncode:
                     raise RuntimeError('Native acceptance command failed (exit ' + str(result.returncode) + ')')
                 return result.stdout

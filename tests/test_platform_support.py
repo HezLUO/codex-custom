@@ -27,13 +27,14 @@ class PlatformTests(unittest.TestCase):
     def test_native_cmd_launches_batch_with_spaced_paths_and_arguments(self):
         spec = importlib.util.spec_from_file_location('native_acceptance', ROOT / 'scripts/accept-platform.py')
         acceptance = importlib.util.module_from_spec(spec); spec.loader.exec_module(acceptance)
-        with tempfile.TemporaryDirectory(prefix='codex cmd fixture ') as temporary:
-            launcher = Path(temporary) / 'fixture launcher.cmd'
-            launcher.write_bytes(b'@echo fixture-native-ok %*\r\n')
-            command = acceptance.launcher_command(launcher, ['--version', 'arg with space'], True)
-            result = subprocess.run(command, capture_output=True)
-            self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
-            self.assertIn(b'fixture-native-ok --version "arg with space"', result.stdout)
+        for prefix, filename in [('codex-cmd-fixture-', 'fixture.cmd'), ('codex cmd fixture ', 'fixture launcher.cmd')]:
+            with self.subTest(path=filename), tempfile.TemporaryDirectory(prefix=prefix) as temporary:
+                launcher = Path(temporary) / filename
+                launcher.write_bytes(b'@echo fixture-native-ok %*\r\n')
+                command = acceptance.launcher_command(launcher, ['--version', 'arg with space'], True)
+                result = subprocess.run(command, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
+                self.assertIn(b'fixture-native-ok --version "arg with space"', result.stdout)
 
     def test_bootstrap_and_runtime_select_exact_targets_and_reject_unknown_hosts(self):
         cases = [('Darwin', 'arm64', 'aarch64-apple-darwin'),
