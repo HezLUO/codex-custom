@@ -36,6 +36,22 @@ class PlatformTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
                 self.assertIn(b'fixture-native-ok --version "arg with space"', result.stdout)
 
+    @unittest.skipUnless(os.name == 'nt', 'Requires the actual Windows command processor')
+    def test_native_launcher_can_remove_itself_and_preserve_exit_status(self):
+        spec = importlib.util.spec_from_file_location('native_acceptance', ROOT / 'scripts/accept-platform.py')
+        acceptance = importlib.util.module_from_spec(spec); spec.loader.exec_module(acceptance)
+        for status in (0, 7):
+            with self.subTest(status=status), tempfile.TemporaryDirectory(prefix='codex remove launcher ') as temporary:
+                state = Path(temporary) / 'state'; runtime = state / 'releases/fixture/runtime'
+                runtime.mkdir(parents=True)
+                (state / 'current.json').write_text(json.dumps({'release': 'fixture'}))
+                launcher = Path(temporary) / 'remove me.cmd'
+                (runtime / 'precompiled.py').write_text('from pathlib import Path;import sys;Path(' + repr(str(launcher)) + ').unlink();sys.exit(' + str(status) + ')')
+                launcher.write_text(precompiled.shim(state))
+                result = subprocess.run(acceptance.launcher_command(launcher, ['--uninstall'], True), capture_output=True)
+                self.assertFalse(launcher.exists())
+                self.assertEqual(result.returncode, status, result.stderr.decode(errors='replace'))
+
     def test_bootstrap_and_runtime_select_exact_targets_and_reject_unknown_hosts(self):
         cases = [('Darwin', 'arm64', 'aarch64-apple-darwin'),
                  ('Darwin', 'x86_64', 'x86_64-apple-darwin'),

@@ -6,6 +6,7 @@ import http.server
 import io
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -63,7 +64,12 @@ def main():
                 native_command = command if isinstance(command, str) else list(map(str, command))
                 result = subprocess.run(native_command, env=environment, cwd=work, capture_output=True, timeout=180)
                 if result.returncode:
-                    raise RuntimeError('Native acceptance command failed (exit ' + str(result.returncode) + ')')
+                    # Only fixed exception names / numeric OS codes are public diagnostics.
+                    # Captured stderr may contain temporary paths; never print it.
+                    errors = re.findall(rb'(?:[A-Za-z]+Error|\[WinError [0-9]+\])', result.stderr)
+                    report['failure'] = dict(exit_code=result.returncode,
+                                             error_kinds=sorted(set(x.decode('ascii') for x in errors)))
+                    raise RuntimeError('Native acceptance command failed (exit ' + str(result.returncode) + '; ' + ', '.join(report['failure']['error_kinds']) + ')')
                 return result.stdout
             initial = args.baseline or args.archive
             call([sys.executable, ROOT / 'scripts/install.py', '--archive', initial.resolve(), '--sha256', artifact.digest(initial.read_bytes()), '--bin-dir', commands])

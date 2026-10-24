@@ -1,0 +1,51 @@
+name: Verify existing Windows candidate
+on:
+  workflow_dispatch:
+    inputs:
+      refresh_runtime:
+        description: Refresh Python runtime while preserving the compiled frontend and original notices
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate-x86_64-pc-windows-msvc
+          run-id: 40103098988
+          github-token: ${{ github.token }}
+          path: compiled
+      - name: Verify compiled input and prepare isolated resources
+        run: python scripts/reuse-windows-candidate.py --input compiled --output dist ${{ inputs.refresh_runtime && '--refresh-runtime' || '' }}
+      - name: Native lifecycle of the existing compiled frontend
+        run: python scripts/accept-platform.py --archive dist/codex-custom.tar.gz --official dist/official --output dist/acceptance.json
+      - name: Native launcher regression
+        if: always()
+        run: python -m unittest discover -s tests -p test_platform_support.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verified-windows-candidate
+          path: |
+            dist/codex-custom.tar.gz
+            dist/codex-custom.tar.gz.sha256
+            dist/release.json
+            dist/license-review.json
+            dist/acceptance.json
+          retention-days: 7
