@@ -78,11 +78,11 @@ class NoticeGenerationTests(unittest.TestCase):
             with self.assertRaises(builder.artifact.ReleaseError):
                 builder.artifact.privacy_check(binary.read_bytes())
 
-    def test_binary_word_suffix_is_not_a_credential_but_real_tokens_are_rejected(self):
-        builder.artifact.privacy_check(b'tas' + b'k-progresspull-request-numberbranch-changes')
-        for marker in (b'sk' + b'-', b'gh' + b'p_', b'Bearer '):
-            with self.assertRaises(builder.artifact.ReleaseError):
-                builder.artifact.privacy_check(b'\0' + marker + b'fixturesecretvalue' * 3)
+    def test_credentials_adjacent_to_other_binary_literals_still_fail(self):
+        for prefix in (b'\0', b'field', b'const_', b'prefix-'):
+            for marker in (b'sk' + b'-', b'gh' + b'p_', b'Bearer '):
+                with self.assertRaises(builder.artifact.ReleaseError):
+                    builder.artifact.privacy_check(prefix + marker + b'fixturesecretvalue' * 3)
 
     def test_home_crate_source_remains_usable_in_both_notice_and_inventory(self):
         with tempfile.TemporaryDirectory() as temporary:

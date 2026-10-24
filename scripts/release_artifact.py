@@ -139,7 +139,7 @@ RULES = {
     'windows-home-path-utf16': rb'(?i)[a-z]\x00:\x00[\\/]\x00U\x00s\x00e\x00r\x00s\x00[\\/]\x00',
     'machine-temporary-path': rb'/(?:private/)?var/folders/[^\s\x00]+',
     'private-key': rb'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',
-    'credential': rb'(?i)(?<![a-z0-9_-])(?:sk-[a-z0-9_-]{20,}|gh[pousr]_[a-z0-9]{20,}|AKIA[A-Z0-9]{16}|Bearer\s+[a-z0-9._-]{20,})',
+    'credential': rb'(?i)(?:sk-[a-z0-9_-]{20,}|gh[pousr]_[a-z0-9]{20,}|AKIA[A-Z0-9]{16}|Bearer\s+[a-z0-9._-]{20,})',
     'session-identifier': rb'(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b',
 }
 # Static upstream literals can be reviewed by SHA-256, never raw sensitive values.
@@ -158,6 +158,27 @@ REVIEWED_LITERALS = {
     '7072290eb10f53ac323515f5fc18c259e24dcabe48f877150b4c665f6f3ad244',
     'be1bef2417a938043e410c938f8a580690835810776f7437dab1799788515adc',
     '7f14466df9323c3c1ef44fdd7124a57ffa807b0c7d4ba6ec314cdd4c24eaed64',
+    # Exact public reference variants: MP4 atom names, credential detector
+    # prefixes, OAuth labels, and TUI/CLI field names merged by the linker.
+    '21ae777849d09ed9ef838ffac0f264adb0973f4609b9a1597b6fc43fec0ecd8b',
+    '2428cf32c11c25ee1de98e1c3b8522b9d9175e7f0a8941cdf4b00cd260edcce5',
+    '287145c74c67db8cecb3158c3db3b65f7927e773600b7351e368bcdb39fc7983',
+    '5565ead01c40fa13e95a45733a2c415869f10d3d2df23cde7b9c16e70ff3c2eb',
+    '788489d19340c903b1b664a09f1da3f68af3ee98cc65c84bf12898afb1e0c3ef',
+    '6f3aa50b505f2a38289110e7405ad26eef29fb31bea4fa6e9cb476e7351ab1ca',
+    'afdeb5ee533885f2736323232d2b8e8ff1401a9e879ccbb87e770bcdd4d03159',
+    '9ff908e3ff0c0e97aef211493198e8da655e548418d09067616458a90a091b5a',
+    '77d6288dafb79edf8d8bb88a5d506d7794c173fed9fdfb7f9404e869a1af4209',
+    '4ff87902041e3ce6d615e3c74440ff75f71e9f9e50da029de858a54bbf63fa24',
+    'c33212249bacb786cca590defb38233451981ff8cf406fa0383a64fe500fa638',
+    'fb620f9139a4e9601aa8cd42c97342b4330642ae99767873a5444665e4614d02',
+    '071e4202f3c4620e8a37b3476604d5e4e28be3f221f7dcb9acbbb1c2e6055421',
+    'd0e13603b8294e32868268516f499f74852369f6a1ced7b85702b892fe8e2902',
+    'e64f78d93f85c6a835d106ab4856a63deabb65f53ecd37d8039d66ef4698881b',
+    '258d725ab8373ab7c7d2eceab74ed9e5bcee79666df641eb312299b1abcace9e',
+    '9f331d8a638bfce01deea0645a267059bb197130b2e3793b6b3f4ad975f19e3f',
+    '6222772ac11915cdeb09e6b17941510324c64266f66c2c14fc0a53d77189a54e',
+    'af18a948b5308f09db3e310544841b5e11efa0c0c1f618882cd96a0c05944b9c',
     '00bce46225b668d670f4ae8a3d3cc4e3279c07d75aefaad5837811a45b8aba02',
     '197d1ddc4ccb013d0e9948f5093f179fd0ff7d26158ba8a01cf3aff3b2097eb9',
     '2b4b584391bdaafc432e211fdc2b09498be570753795cf88d7cf36f0ea6bdf81',
@@ -261,6 +282,53 @@ def verify_binary(path, expected_version='0.164.0', privacy_verified_sha256=None
             raise ReleaseError('frontend signing policy mismatch')
     return checksum
 
+def constant_data_ranges(data, target):
+    """Validated non-executable constant sections shared by both sanitizers."""
+    check_architecture(data, target)
+    regions = []
+    if 'linux' in target:
+        table = struct.unpack_from('<Q', data, 40)[0]
+        size, count = struct.unpack_from('<HH', data, 58)
+        if size != 64 or table + size * count > len(data):
+            raise ReleaseError('Invalid ELF section table')
+        for i in range(count):
+            _, kind, flags, _, offset, length = struct.unpack_from('<IIQQQQ', data, table + i * size)
+            if kind == 1 and flags & 2 and not flags & 5:
+                regions.append((offset, offset + length))
+    elif target.endswith('apple-darwin'):
+        count = struct.unpack_from('<I', data, 16)[0]; cursor = 32
+        for _ in range(count):
+            command, size = struct.unpack_from('<II', data, cursor)
+            if size < 8 or cursor + size > len(data):
+                raise ReleaseError('Invalid Mach-O load command')
+            if command == 0x19:
+                sections = struct.unpack_from('<I', data, cursor + 64)[0]
+                if 72 + 80 * sections > size: raise ReleaseError('Invalid Mach-O sections')
+                for i in range(sections):
+                    section = cursor + 72 + i * 80
+                    name = bytes(data[section:section + 16]).rstrip(b'\0')
+                    segment = bytes(data[section + 16:section + 32]).rstrip(b'\0')
+                    length = struct.unpack_from('<Q', data, section + 40)[0]
+                    offset = struct.unpack_from('<I', data, section + 48)[0]
+                    if segment == b'__TEXT' and name in (b'__cstring', b'__const'):
+                        regions.append((offset, offset + length))
+            cursor += size
+    else:
+        pe = struct.unpack_from('<I', data, 60)[0]
+        count = struct.unpack_from('<H', data, pe + 6)[0]
+        optional = struct.unpack_from('<H', data, pe + 20)[0]
+        table = pe + 24 + optional
+        if table + count * 40 > len(data): raise ReleaseError('Invalid PE sections')
+        for i in range(count):
+            section = table + i * 40
+            length, offset = struct.unpack_from('<II', data, section + 16)
+            flags = struct.unpack_from('<I', data, section + 36)[0]
+            if flags & 0x40000040 == 0x40000040 and not flags & 0xa0000000:
+                regions.append((offset, offset + length))
+    if any(start < 0 or end > len(data) for start, end in regions):
+        raise ReleaseError('Invalid constant-section bounds')
+    return regions
+
 def sanitize_binary(source, output):
     """Redact home-prefix literals only in Mach-O constant data, then re-sign copy."""
     source, output = Path(source), Path(output)
@@ -270,16 +338,7 @@ def sanitize_binary(source, output):
     verify_data = data
     if data[:8] != bytes.fromhex('cffaedfe0c000001'):
         raise ReleaseError('frontend architecture must be thin Mach-O arm64')
-    ranges = []
-    offset = 32
-    for _ in range(struct.unpack_from('<I', data, 16)[0]):
-        command, size = struct.unpack_from('<II', data, offset)
-        if command == 0x19:
-            for index in range(struct.unpack_from('<I', data, offset + 64)[0]):
-                section = struct.unpack_from('<16s16sQQIIIIIIII', data, offset + 72 + index * 80)
-                if section[0].rstrip(b'\0') in (b'__cstring', b'__const') and section[1].rstrip(b'\0') == b'__TEXT':
-                    ranges.append((section[4], section[4] + section[3]))
-        offset += size
+    ranges = constant_data_ranges(data, 'aarch64-apple-darwin')
     replacements = 0
     result = bytearray(data)
     for match in re.finditer(rb'/(?:Users|home)/[^/\s\x00<>"\x27]+', data):

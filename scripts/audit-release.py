@@ -7,6 +7,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_FILES = {
+    'scripts/privacy-diagnostic-cert.pem',
     'scripts/sync-bootstraps.py', 'tests/test_platform_build.py',
     '.github/workflows/build-platforms.yml', 'bootstrap.ps1', 'scripts/build-platform.py',
     'scripts/accept-platform.py', 'tests/test_platform_support.py', 'tests/test_platform_commands.py',

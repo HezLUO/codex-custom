@@ -49,6 +49,7 @@ jobs:
           python-version: '3.12'
       - name: Portable command-boundary checks
         run: |
+          openssl version
           python scripts/sync-bootstraps.py --check
           python -m unittest discover -s tests -p test_platform_support.py
           python -m unittest discover -s tests -p test_platform_build.py
@@ -100,5 +101,6 @@ jobs:
             dist/license-review.json
             dist/acceptance.json
             dist/privacy-review.json
+            dist/privacy-details.cms
           if-no-files-found: ignore
           retention-days: 7

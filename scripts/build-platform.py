@@ -9,7 +9,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-import struct
 import subprocess
 import sys
 import tarfile
@@ -226,49 +225,7 @@ def redact_build_paths(binary, target, prefixes):
     still fail the ordinary artifact admission check. Never patch instructions.
     """
     data = bytearray(binary.read_bytes())
-    portable.check_architecture(data, target)
-    regions = []
-    if 'linux' in target:
-        table = struct.unpack_from('<Q', data, 40)[0]
-        size, count = struct.unpack_from('<HH', data, 58)
-        if size != 64 or table + size * count > len(data):
-            raise RuntimeError('Invalid ELF section table')
-        for i in range(count):
-            _, kind, flags, _, offset, length = struct.unpack_from('<IIQQQQ', data, table + i * size)
-            if kind == 1 and flags & 2 and not flags & 5:
-                regions.append((offset, offset + length))
-    elif target.endswith('apple-darwin'):
-        count = struct.unpack_from('<I', data, 16)[0]; cursor = 32
-        for _ in range(count):
-            command, size = struct.unpack_from('<II', data, cursor)
-            if size < 8 or cursor + size > len(data):
-                raise RuntimeError('Invalid Mach-O load command')
-            if command == 0x19:
-                sections = struct.unpack_from('<I', data, cursor + 64)[0]
-                if 72 + 80 * sections > size: raise RuntimeError('Invalid Mach-O sections')
-                for i in range(sections):
-                    section = cursor + 72 + i * 80
-                    name = bytes(data[section:section + 16]).rstrip(b'\0')
-                    segment = bytes(data[section + 16:section + 32]).rstrip(b'\0')
-                    length = struct.unpack_from('<Q', data, section + 40)[0]
-                    offset = struct.unpack_from('<I', data, section + 48)[0]
-                    if segment == b'__TEXT' and name in (b'__cstring', b'__const'):
-                        regions.append((offset, offset + length))
-            cursor += size
-    else:
-        pe = struct.unpack_from('<I', data, 60)[0]
-        count = struct.unpack_from('<H', data, pe + 6)[0]
-        optional = struct.unpack_from('<H', data, pe + 20)[0]
-        table = pe + 24 + optional
-        if table + count * 40 > len(data): raise RuntimeError('Invalid PE sections')
-        for i in range(count):
-            section = table + i * 40
-            length, offset = struct.unpack_from('<II', data, section + 16)
-            flags = struct.unpack_from('<I', data, section + 36)[0]
-            if flags & 0x40000040 == 0x40000040 and not flags & 0xa0000000:
-                regions.append((offset, offset + length))
-    if any(start < 0 or end > len(data) for start, end in regions):
-        raise RuntimeError('Invalid constant-section bounds')
+    regions = artifact.constant_data_ranges(data, target)
     replacements = {}
     for prefix in prefixes:
         raw = str(prefix).encode('utf-8')
@@ -363,6 +320,18 @@ def build(source, work, out, target):
             dict(rule=label, sha256=checksum, size=size, count=count)
             for (label, checksum, size), count in sorted(findings.items())])
         (out / 'privacy-review.json').write_text(json.dumps(diagnostic, indent=2), encoding='utf-8')
+        # Reviewers can inspect exact unknown matches without publishing them.
+        # Only the public encryption certificate belongs in source; the private
+        # recipient key remains outside the checkout on the maintainer machine.
+        details = dict(binary_sha256=artifact.digest(data), findings=[
+            dict(rule=label, sha256=artifact.digest(match.group()), value_hex=match.group().hex())
+            for label, pattern in artifact.RULES.items() for match in re.finditer(pattern, data)
+            if artifact.digest(match.group()) not in artifact.REVIEWED_LITERALS])
+        with tempfile.TemporaryDirectory() as temporary:
+            plaintext = Path(temporary) / 'details.json'
+            plaintext.write_text(json.dumps(details), encoding='utf-8')
+            run(['openssl', 'cms', '-encrypt', '-binary', '-aes-256-cbc', '-in', plaintext,
+                 '-outform', 'DER', '-out', out / 'privacy-details.cms', ROOT / 'scripts/privacy-diagnostic-cert.pem'])
         raise
     run([binary, '--help'], capture=True)
     provenance = dict(binary_sha256=artifact.digest(binary.read_bytes()), build_action='native clean CI build',
