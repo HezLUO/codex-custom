@@ -72,7 +72,14 @@ def main():
                     raise RuntimeError('Native acceptance command failed (exit ' + str(result.returncode) + '; ' + ', '.join(report['failure']['error_kinds']) + ')')
                 return result.stdout
             initial = args.baseline or args.archive
-            call([sys.executable, ROOT / 'scripts/install.py', '--archive', initial.resolve(), '--sha256', artifact.digest(initial.read_bytes()), '--bin-dir', commands])
+            installer = ROOT / 'scripts/install.py'
+            if args.baseline:
+                _, old_payload = artifact.read_archive(args.baseline, expected_target=target)
+                legacy = root / 'legacy-installer'; legacy.mkdir()
+                for name in ('precompiled.py', 'release_artifact.py', 'update-codex-custom.py'):
+                    (legacy / name).write_bytes(old_payload['runtime/' + name])
+                installer = legacy / 'precompiled.py'
+            call([sys.executable, installer, '--archive', initial.resolve(), '--sha256', artifact.digest(initial.read_bytes()), '--bin-dir', commands])
             if args.baseline: report['checks'].append('previous-release installer/runtime upgrade')
             if str(ROOT) in launcher.read_text(encoding='utf-8'): raise RuntimeError('Launcher retains checkout path')
             def invoke(*arguments):

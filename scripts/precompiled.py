@@ -71,7 +71,7 @@ def locked(state, create=False):
         yield
 
 
-def shim(state):
+def shim(state, *, legacy_windows=False):
     if portable.windows():
         python = str(Path(sys.executable).resolve())
         if any(c in python for c in ('%', '"', '\r', '\n')):
@@ -87,10 +87,28 @@ def shim(state):
         encoded = base64.b64encode(code.encode()).decode()
         # Leave batch context while the file still exists, then run Python from
         # the already parsed command chain. Python may safely remove this file.
-        return ('@echo off\nrem ' + OWNER + '\n(goto) 2>nul & "' + python
+        prefix = '@echo off\nrem ' + OWNER + '\n' if legacy_windows else '@(goto) 2>nul & '
+        return (prefix + '"' + python
                 + '" -c "import base64;exec(base64.b64decode(\'' + encoded + '\'))" %*\n')
     # Freeze this installation's state location, independent of shell environment/checkout.
     return '#!/bin/sh\n# ' + OWNER + '\nexport CODEX_CUSTOM_STATE_DIR=' + shlex.quote(str(state)) + '\nexec python3 ' + shlex.quote(str(state / 'current/runtime/precompiled.py')) + ' --launch -- "$@"\n'
+
+
+def matches_shim(state, text):
+    return text == shim(state) or (portable.windows() and text == shim(state, legacy_windows=True))
+
+
+def replace_shim(destination, data):
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(data)
+        temporary.chmod(0o755)
+        os.replace(temporary, destination)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def launcher_path(bin_dir):
@@ -219,7 +237,7 @@ def install(archive, checksum, bin_dir, state, lock_held=False):
         if owner and owner.get('launcher') != str(destination):
             raise RuntimeError('Installation is owned by another launcher location')
         exists = os.path.lexists(destination)
-        if exists and (not owner or portable.is_link(destination) or not destination.is_file() or destination.read_text() != expected):
+        if exists and (not owner or portable.is_link(destination) or not destination.is_file() or not matches_shim(state, destination.read_text())):
             raise RuntimeError('Destination exists and is not owned; choose another --bin-dir')
         if owner:
             if Path(owner['package_parent']) != root.parent / 'codex-custom':
@@ -239,6 +257,7 @@ def install(archive, checksum, bin_dir, state, lock_held=False):
         activated = False
         created_package = False
         created_shim = False
+        previous_shim = None
         link = None
         try:
             for name, data in payload.items():
@@ -260,6 +279,9 @@ def install(archive, checksum, bin_dir, state, lock_held=False):
                     created_shim = True
                     stream.write(expected)
                 destination.chmod(0o755)
+            if exists and destination.read_text() != expected:
+                previous_shim = destination.read_bytes()
+                replace_shim(destination, expected.encode())
             if not owner:
                 (state / 'owner.json').write_text(json.dumps(dict(owner=OWNER, launcher=str(destination), installation_id=installation_id, package_parent=str(root.parent / 'codex-custom'))) + '\n')
             link = state / ('activate-' + uuid.uuid4().hex)
@@ -274,6 +296,8 @@ def install(archive, checksum, bin_dir, state, lock_held=False):
             if not activated:
                 if link is not None:
                     link.unlink(missing_ok=True)
+                if previous_shim is not None:
+                    replace_shim(destination, previous_shim)
                 if created_shim:
                     destination.unlink(missing_ok=True)
                 if not owner:
@@ -295,7 +319,7 @@ def uninstall(state, bin_dir, purge=False):
         destination = launcher_path(bin_dir)
         if not owner or owner.get('launcher') != str(destination):
             raise RuntimeError('Unknown installation ownership')
-        if os.path.lexists(destination) and (portable.is_link(destination) or not destination.is_file() or destination.read_text() != shim(state)):
+        if os.path.lexists(destination) and (portable.is_link(destination) or not destination.is_file() or not matches_shim(state, destination.read_text())):
             raise RuntimeError('Launcher is not owned; refusing uninstall')
         if os.path.lexists(selection(state)):
             checked_current(state)
@@ -359,7 +383,7 @@ def update(state, bin_dir, source):
     with locked(state):
         owner = owner_receipt(state)
         destination = launcher_path(bin_dir)
-        if not owner or owner.get('launcher') != str(destination) or portable.is_link(destination) or not destination.is_file() or destination.read_text() != shim(state):
+        if not owner or owner.get('launcher') != str(destination) or portable.is_link(destination) or not destination.is_file() or not matches_shim(state, destination.read_text()):
             raise RuntimeError('Launcher is not owned; refusing update')
         release, receipt = checked_current(state)
         if 'bootstrap.py' not in receipt['manifest']['members']:

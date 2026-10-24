@@ -36,6 +36,9 @@ jobs:
         run: python scripts/reuse-windows-candidate.py --input compiled --output dist ${{ inputs.refresh_runtime && '--refresh-runtime' || '' }}
       - name: Native lifecycle of the existing compiled frontend
         run: python scripts/accept-platform.py --archive dist/codex-custom.tar.gz --official dist/official --output dist/acceptance.json
+      - name: Previous Windows candidate upgrade and lifecycle
+        if: ${{ inputs.refresh_runtime }}
+        run: python scripts/accept-platform.py --baseline compiled/codex-custom.tar.gz --archive dist/codex-custom.tar.gz --official dist/official --output dist/acceptance-legacy.json
       - name: Native launcher regression
         if: always()
         run: python -m unittest discover -s tests -p test_platform_support.py
@@ -49,4 +52,5 @@ jobs:
             dist/release.json
             dist/license-review.json
             dist/acceptance.json
+            dist/acceptance-legacy.json
           retention-days: 7

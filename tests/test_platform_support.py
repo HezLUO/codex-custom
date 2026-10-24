@@ -98,6 +98,18 @@ class PlatformTests(unittest.TestCase):
                 (state / 'current.json').write_text(json.dumps({'release': invalid}))
                 with self.assertRaises(RuntimeError): precompiled.current_release(state)
 
+    def test_windows_legacy_launcher_recognition_is_exact(self):
+        with patch.object(portable, 'windows', return_value=True):
+            state = Path('fixture-state')
+            current = precompiled.shim(state)
+            legacy = precompiled.shim(state, legacy_windows=True)
+            self.assertNotEqual(current, legacy)
+            self.assertLess(len(current), len(legacy))
+            for text in (current, legacy):
+                self.assertTrue(precompiled.matches_shim(state, text))
+                self.assertFalse(precompiled.matches_shim(state, text + 'foreign command'))
+                self.assertFalse(precompiled.matches_shim(Path('other-state'), text))
+
     def test_staging_reseals_only_frontend_voice_digest_and_preserves_official_package(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary); official = root / 'releases/official'; (official / 'bin').mkdir(parents=True)
