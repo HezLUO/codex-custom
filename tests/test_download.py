@@ -152,7 +152,7 @@ class DownloadTests(unittest.TestCase):
         before = (self.root / 'state/current').readlink()
         def change(payload):
             name = 'runtime/release_artifact.py'
-            payload[name] += b"\ndef read_archive(path, expected_version='0.164.0'):\n    raise ReleaseError('new runtime validator rejected candidate')\n"
+            payload[name] += b"\ndef read_archive(path, expected_version='0.164.0', expected_target=None):\n    raise ReleaseError('new runtime validator rejected candidate')\n"
             manifest = json.loads(payload['release.json'])
             manifest['members'][name]['sha256'] = hashlib.sha256(payload[name]).hexdigest()
             payload['release.json'] = json.dumps(manifest).encode()
@@ -268,7 +268,7 @@ class DownloadTests(unittest.TestCase):
         self.tool('uname', '#!/bin/sh\necho Linux\n')
         result = subprocess.run(['/bin/sh', str(ROOT / 'bootstrap.sh')], env=environment, text=True, capture_output=True)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('macOS Apple Silicon', result.stderr)
+        self.assertIn('unsupported system/architecture', result.stderr)
 
     def test_signature_failure_and_wrong_archive_architecture_or_version_preserve_install(self):
         folder, source = self.service()

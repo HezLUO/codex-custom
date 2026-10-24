@@ -9,10 +9,10 @@ if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)'; 
   echo 'Installation stopped: Python 3.9+ is required; upgrade Python and retry. Use official codex for recovery.' >&2
   exit 1
 fi
-if [ "$(uname -s)" != Darwin ] || [ "$(uname -m)" != arm64 ]; then
-  echo 'Installation stopped: requires macOS Apple Silicon (arm64); use official codex for recovery.' >&2
-  exit 1
-fi
+case "$(uname -s):$(uname -m)" in
+  Darwin:arm64|Darwin:x86_64|Linux:x86_64|Linux:aarch64|Linux:arm64) ;;
+  *) echo 'Installation stopped: unsupported system/architecture; use bootstrap.ps1 on Windows or official codex for recovery.' >&2; exit 1 ;;
+esac
 python3 - "$@" <<'PY'
 import os
 from pathlib import Path

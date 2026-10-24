@@ -103,7 +103,7 @@ Path.mkdir = mkdir
         payload['runtime/update-codex-custom.py'] = (ROOT / 'update-codex-custom.py').read_bytes()
         for name in ('bootstrap.py', 'bootstrap.sh'):
             payload[name] = (ROOT / name).read_bytes()
-        manifest = dict(schema=1, official_version='0.164.0', target='aarch64-apple-darwin', layout_version=1, release_id='fixture.1', source_commit='a' * 40, patch_sha256='b' * 64, provenance={}, signing='ad-hoc; no publisher identity or notarization', members={name: dict(sha256=hashlib.sha256(data).hexdigest(), mode=0o755 if name in ('bin/codex', 'bootstrap.sh') else 0o644) for name, data in payload.items()})
+        manifest = dict(schema=1, official_version='0.164.0', target='aarch64-apple-darwin', layout_version=1, release_id='fixture.1', source_commit='a' * 40, patch_sha256='b' * 64, provenance={}, signing='ad-hoc; no publisher identity or notarization', members={name: dict(sha256=hashlib.sha256(data).hexdigest(), mode=0o755 if name in ('bin/codex', 'bin/codex.exe', 'bootstrap.sh') else 0o644) for name, data in payload.items()})
         payload['release.json'] = json.dumps(manifest).encode()
         if mutation:
             mutation(payload)
@@ -112,7 +112,7 @@ Path.mkdir = mkdir
             for name, data in payload.items():
                 entry = tarfile.TarInfo(name)
                 entry.size = len(data)
-                entry.mode = 0o755 if name in ('bin/codex', 'bootstrap.sh') else 0o644
+                entry.mode = 0o755 if name in ('bin/codex', 'bin/codex.exe', 'bootstrap.sh') else 0o644
                 stream.addfile(entry, io.BytesIO(data))
         return ['--archive', str(archive), '--sha256', hashlib.sha256(archive.read_bytes()).hexdigest()]
 

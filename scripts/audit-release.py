@@ -7,6 +7,9 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_FILES = {
+    '.github/workflows/build-platforms.yml', 'bootstrap.ps1', 'scripts/build-platform.py',
+    'scripts/accept-platform.py', 'tests/test_platform_support.py', 'tests/test_platform_commands.py',
+    'docs/adr/0002-native-platform-candidates.md',
     'bootstrap.sh', 'bootstrap.py', 'tests/test_download.py', '.gitignore', 'LICENSE', 'NOTICE', 'README.md', 'codex-custom',
     'update-codex-custom.py', 'patches/codex-0.164.0-context-details.patch',
     'scripts/install.py', 'scripts/install-source.py', 'scripts/precompiled.py', 'tests/test_precompiled.py', 'scripts/audit-release.py', 'scripts/release_artifact.py',
@@ -20,6 +23,7 @@ PUBLIC_FILES = {
 # Report only rule labels and object IDs, never matching content.
 RULES = {
     'personal-home-path': rb'/(?:Users|home)/[^\s/<>"\x27]+',
+    'windows-home-path': rb'(?i)[a-z]:[\\/](?:Users|Documents and Settings)[\\/][^\s\\/\x00<>"\x27]+',
     'machine-temporary-path': rb'/(?:private/)?var/folders/[^\s]+',
     'private-key': rb'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',
     'credential': rb'(?i)(?:sk-[a-z0-9_-]{20,}|gh[pousr]_[a-z0-9]{20,}|AKIA[A-Z0-9]{16}|Bearer\s+[a-z0-9._-]{20,})',

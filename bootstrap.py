@@ -24,17 +24,33 @@ DEFAULT_SOURCE = 'https://github.com/HezLUO/codex-custom/releases/download'
 MAX_ARCHIVE = 256 * 1024 * 1024
 MAX_UNPACKED = 768 * 1024 * 1024
 RUNTIME = {'runtime/precompiled.py', 'runtime/release_artifact.py', 'runtime/update-codex-custom.py'}
-MEMBERS = RUNTIME | {'bin/codex', 'LICENSE', 'NOTICE', 'DEPENDENCY-NOTICES.txt', 'release.json', 'bootstrap.sh', 'bootstrap.py'}
+MEMBERS = RUNTIME | {'bin/codex', 'LICENSE', 'NOTICE', 'DEPENDENCY-NOTICES.txt', 'release.json', 'bootstrap.sh', 'bootstrap.py', 'bootstrap.ps1', 'bin/codex.exe'}
+
+
+def host_target():
+    system, machine = platform.system().lower(), platform.machine().lower()
+    machine = {'amd64': 'x86_64', 'aarch64': 'arm64'}.get(machine, machine)
+    targets = {('darwin', 'arm64'): 'aarch64-apple-darwin',
+               ('darwin', 'x86_64'): 'x86_64-apple-darwin',
+               ('linux', 'x86_64'): 'x86_64-unknown-linux-musl',
+               ('linux', 'arm64'): 'aarch64-unknown-linux-musl',
+               ('windows', 'x86_64'): 'x86_64-pc-windows-msvc'}
+    if (system, machine) not in targets:
+        raise ValueError('Unsupported system/architecture; use official codex')
+    return targets[system, machine]
 
 
 def preflight():
-    # Bootstrap is standalone; the installed runtime repeats the authoritative
-    # package inventory and stability checks before activation.
-    if platform.system() != 'Darwin' or platform.machine() != 'arm64':
-        raise ValueError('Requires macOS Apple Silicon (arm64)')
-    if not shutil.which('codesign'):
+    # Remain standalone until every downloaded runtime member is verified.
+    target = host_target()
+    windows = target.endswith('windows-msvc')
+    entrypoint = 'bin/codex.exe' if windows else 'bin/codex'
+    if target.endswith('apple-darwin') and not shutil.which('codesign'):
         raise ValueError('Requires the macOS codesign tool')
-    binary = Path(os.environ.get('CODEX_OFFICIAL_BIN', str(Path.home() / '.local/bin/codex'))).expanduser().resolve(strict=True)
+    default = Path.home() / '.local/bin/codex'
+    if windows:
+        default = (Path(os.environ['CODEX_INSTALL_DIR']) if os.environ.get('CODEX_INSTALL_DIR') else Path(os.environ.get('LOCALAPPDATA', Path.home() / 'AppData/Local')) / 'Programs/OpenAI/Codex/bin') / 'codex.exe'
+    binary = Path(os.environ.get('CODEX_OFFICIAL_BIN', str(default))).expanduser().resolve(strict=True)
     version_result = subprocess.run([str(binary), '--version'], capture_output=True, text=True, timeout=30, check=True)
     match = re.fullmatch(r'codex-cli ([0-9]+\.[0-9]+\.[0-9]+)', version_result.stdout.strip())
     if not match:
@@ -43,10 +59,16 @@ def preflight():
     root = binary.parent.parent
     releases = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex'))).expanduser().resolve() / 'packages/standalone/releases'
     metadata = json.loads((root / 'codex-package.json').read_text())
-    expected = dict(layoutVersion=1, version=version, target='aarch64-apple-darwin', variant='codex', entrypoint='bin/codex', resourcesDir='codex-resources', pathDir='codex-path')
-    if root.parent != releases or binary != root / 'bin/codex' or any(metadata.get(k) != v for k, v in expected.items()):
+    expected = dict(layoutVersion=1, version=version, target=target, variant='codex', entrypoint=entrypoint, resourcesDir='codex-resources', pathDir='codex-path')
+    if root.parent != releases or binary != root / entrypoint or any(metadata.get(k) != v for k, v in expected.items()):
         raise ValueError('Requires a matching complete official standalone package in CODEX_HOME')
-    for name in ('bin/codex-code-mode-host', 'codex-path/rg'):
+    suffix = '.exe' if windows else ''
+    helpers = ['bin/codex-code-mode-host' + suffix, 'codex-path/rg' + suffix]
+    if windows:
+        helpers += ['codex-resources/codex-command-runner.exe', 'codex-resources/codex-windows-sandbox-setup.exe']
+    if 'linux' in target:
+        helpers += ['codex-resources/bwrap']
+    for name in helpers:
         if not os.access(root / name, os.X_OK):
             raise ValueError('Official package is missing executable helpers')
     if not (root / 'codex-resources/voice').is_dir():
@@ -124,13 +146,14 @@ def unpack_runtime(archive, root, descriptor):
 def download_and_install(source, bin_dir, lock_held=False):
     version = preflight()
     source = checked_url(source.rstrip('/'))
-    tag = 'official-' + version + '-aarch64-apple-darwin'
+    target = host_target()
+    tag = 'official-' + version + '-' + target
     with tempfile.TemporaryDirectory(prefix='codex-custom-download-') as temporary:
         root = Path(temporary)
         fetch(source + '/' + tag + '/release.json', root / 'descriptor.json', 64 * 1024)
         descriptor = json.loads((root / 'descriptor.json').read_text())
         if (descriptor.get('schema') != 1 or descriptor.get('official_version') != version
-                or descriptor.get('target') != 'aarch64-apple-darwin' or descriptor.get('layout_version') != 1
+                or descriptor.get('target') != target or descriptor.get('layout_version') != 1
                 or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,79}', descriptor.get('release_id', ''))
                 or descriptor.get('archive') != 'codex-custom.tar.gz'
                 or not re.fullmatch(r'[0-9a-f]{64}', descriptor.get('sha256', ''))):

@@ -12,10 +12,131 @@ import struct
 import tempfile
 import os
 import tarfile
+import platform
+
+TARGETS = {
+    'aarch64-apple-darwin': ('darwin', 'arm64'),
+    'x86_64-apple-darwin': ('darwin', 'x86_64'),
+    'x86_64-unknown-linux-musl': ('linux', 'x86_64'),
+    'aarch64-unknown-linux-musl': ('linux', 'arm64'),
+    'x86_64-pc-windows-msvc': ('windows', 'x86_64'),
+}
+
+
+def host_target():
+    system, machine = platform.system().lower(), platform.machine().lower()
+    machine = {'amd64': 'x86_64', 'aarch64': 'arm64'}.get(machine, machine)
+    for target, pair in TARGETS.items():
+        if pair == (system, machine):
+            return target
+    raise ValueError('Unsupported system/architecture; use official codex')
+
+
+def windows(target=None):
+    return TARGETS[target or host_target()][0] == 'windows'
+
+
+def entrypoint(target=None):
+    return 'bin/codex.exe' if windows(target) else 'bin/codex'
+
+
+def signing(target):
+    return ('ad-hoc; no publisher identity or notarization' if TARGETS[target][0] == 'darwin'
+            else 'unsigned; no publisher identity or notarization')
+
+
+def helpers(target):
+    suffix = '.exe' if windows(target) else ''
+    files = ['bin/codex-code-mode-host' + suffix, 'codex-path/rg' + suffix]
+    if TARGETS[target][0] == 'windows':
+        files += ['codex-resources/codex-command-runner.exe',
+                  'codex-resources/codex-windows-sandbox-setup.exe']
+    if TARGETS[target][0] == 'linux':
+        files += ['codex-resources/bwrap']
+    return files
+
+
+def check_architecture(data, target):
+    family, cpu = TARGETS[target]
+    if family == 'darwin':
+        expected = 'cffaedfe0c000001' if cpu == 'arm64' else 'cffaedfe07000001'
+        valid = len(data) >= 32 and data[:8] == bytes.fromhex(expected)
+    elif family == 'linux':
+        valid = (len(data) >= 64 and data[:6] == b'\x7fELF\x02\x01'
+                 and struct.unpack_from('<H', data, 18)[0] == (183 if cpu == 'arm64' else 62))
+    else:
+        valid = False
+        if len(data) >= 64 and data[:2] == b'MZ':
+            offset = struct.unpack_from('<I', data, 60)[0]
+            valid = (offset >= 64 and offset + 26 <= len(data)
+                     and data[offset:offset + 6] == b'PE\0\0\x64\x86'
+                     and data[offset + 24:offset + 26] == b'\x0b\x02')
+    if not valid:
+        raise ValueError('Frontend format/architecture does not match release target')
+
+
+def mode_matches(path, expected):
+    # Windows has no POSIX executable mode; archive modes remain strict and hashes
+    # cover file content. Never weaken POSIX permission verification.
+    return os.name == 'nt' or path.stat().st_mode & 0o777 == expected
+
+
+def is_link(path):
+    if path.is_symlink():
+        return True
+    try:
+        return bool(getattr(path.lstat(), 'st_file_attributes', 0) & 0x400)
+    except FileNotFoundError:
+        return False
+
+
+LOCK_EX, LOCK_SH, LOCK_NB = 2, 1, 4
+
+
+def flock(stream, flags):
+    if os.name != 'nt':
+        import fcntl
+        return fcntl.flock(stream, flags)
+    import ctypes
+    from ctypes import wintypes
+    import msvcrt
+    # CRT _locking's read modes are still exclusive. LockFileEx supplies actual
+    # shared leases, so simultaneous frontend sessions remain possible.
+    class Overlapped(ctypes.Structure):
+        _fields_ = [('Internal', ctypes.c_size_t), ('InternalHigh', ctypes.c_size_t),
+                    ('Offset', wintypes.DWORD), ('OffsetHigh', wintypes.DWORD), ('hEvent', wintypes.HANDLE)]
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    lock = kernel.LockFileEx
+    lock.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
+                     wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(Overlapped)]
+    lock.restype = wintypes.BOOL
+    handle = msvcrt.get_osfhandle(stream.fileno())
+    overlap = Overlapped()
+    mode = 1 | (2 if flags & LOCK_EX else 0)
+    while True:
+        if lock(handle, mode, 0, 1, 0, ctypes.byref(overlap)):
+            return
+        error = ctypes.get_last_error()
+        if error != 33:  # ERROR_LOCK_VIOLATION
+            raise ctypes.WinError(error)
+        if flags & LOCK_NB:
+            raise BlockingIOError('Managed release is locked')
+        import time
+        time.sleep(0.05)
+
+
+def default_official():
+    if windows():
+        base = os.environ.get('CODEX_INSTALL_DIR')
+        return (Path(base) if base else Path(os.environ.get('LOCALAPPDATA', Path.home() / 'AppData/Local')) / 'Programs/OpenAI/Codex/bin') / 'codex.exe'
+    return Path.home() / '.local/bin/codex'
+
 
 ROOT = Path(__file__).resolve().parents[1]
 RULES = {
     'personal-home-path': rb'/(?:Users|home)/[^\s/<>"\x27]+',
+    'windows-home-path': rb'(?i)[a-z]:[\\/](?:Users|Documents and Settings)[\\/][^\s\\/\x00<>"\x27]+',
+    'windows-home-path-utf16': rb'(?i)[a-z]\x00:\x00[\\/]\x00U\x00s\x00e\x00r\x00s\x00[\\/]\x00',
     'machine-temporary-path': rb'/(?:private/)?var/folders/[^\s\x00]+',
     'private-key': rb'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',
     'credential': rb'(?i)(?:sk-[a-z0-9_-]{20,}|gh[pousr]_[a-z0-9]{20,}|AKIA[A-Z0-9]{16}|Bearer\s+[a-z0-9._-]{20,})',
@@ -36,7 +157,7 @@ REVIEWED_LITERALS = {
     'b5763688815b9b9dd18772e235bcf8324269b938dc0fd8e50b6341101a95702e',
 }
 BASE_MEMBERS = {'bin/codex', 'LICENSE', 'NOTICE', 'DEPENDENCY-NOTICES.txt'}
-RUNTIME_MEMBERS = {'runtime/precompiled.py', 'runtime/release_artifact.py', 'runtime/update-codex-custom.py', 'bootstrap.sh', 'bootstrap.py'}
+RUNTIME_MEMBERS = {'runtime/precompiled.py', 'runtime/release_artifact.py', 'runtime/update-codex-custom.py', 'bootstrap.sh', 'bootstrap.py', 'bootstrap.ps1'}
 
 MAX_ARCHIVE = 256 * 1024 * 1024
 MAX_UNPACKED = 768 * 1024 * 1024
@@ -53,7 +174,7 @@ def privacy_check(data):
             if digest(match.group()) not in REVIEWED_LITERALS:
                 raise ReleaseError('privacy: ' + label)
 
-def read_archive(path, expected_version='0.164.0'):
+def read_archive(path, expected_version='0.164.0', expected_target=None):
     """Return (validated manifest, payload bytes); never extract untrusted paths."""
     if Path(path).stat().st_size > MAX_ARCHIVE:
         raise ReleaseError('Release archive size limit exceeded')
@@ -64,7 +185,7 @@ def read_archive(path, expected_version='0.164.0'):
         with tarfile.open(path, 'r:gz') as archive:
             for item in archive:
                 total += item.size
-                if (not item.isfile() or item.name not in BASE_MEMBERS | RUNTIME_MEMBERS | {'release.json'}
+                if (not item.isfile() or item.name not in BASE_MEMBERS | RUNTIME_MEMBERS | {'release.json', 'bin/codex.exe'}
                         or item.name in payload or item.size > 512 * 1024 * 1024 or total > MAX_UNPACKED
                         or item.mode not in (0o644, 0o755) or item.pax_headers):
                     raise ReleaseError('archive member rejected')
@@ -72,27 +193,33 @@ def read_archive(path, expected_version='0.164.0'):
                 modes[item.name] = item.mode
                 privacy_check(payload[item.name])
         manifest = json.loads(payload.pop('release.json'))
+        target = manifest.get('target')
         if (manifest.get('schema') != 1 or manifest.get('official_version') != expected_version
-                or manifest.get('target') != 'aarch64-apple-darwin' or manifest.get('layout_version') != 1
+                or target not in TARGETS or (expected_target is not None and target != expected_target) or manifest.get('layout_version') != 1
                 or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}', manifest.get('release_id', ''))
                 or not re.fullmatch(r'[0-9a-f]{40}', manifest.get('source_commit', ''))
                 or not re.fullmatch(r'[0-9a-f]{64}', manifest.get('patch_sha256', ''))
                 or not isinstance(manifest.get('provenance'), dict)
-                or manifest.get('signing') != 'ad-hoc; no publisher identity or notarization'):
+                or manifest.get('signing') != signing(target)):
             raise ReleaseError('release metadata rejected')
         members = manifest['members']
-        if set(members) != set(payload) or not BASE_MEMBERS <= set(payload):
+        base = (BASE_MEMBERS - {'bin/codex'}) | {entrypoint(target)}
+        if (set(members) != set(payload) or not base <= set(payload)
+                or (('bin/codex' if windows(target) else 'bin/codex.exe') in payload)):
             raise ReleaseError('archive member manifest mismatch')
         for name, data in payload.items():
             if members[name] != {'sha256': digest(data), 'mode': modes[name]}:
                 raise ReleaseError('archive member digest or mode mismatch')
-        if modes['bin/codex'] != 0o755:
+        if modes[entrypoint(target)] != 0o755:
             raise ReleaseError('frontend must be executable')
         return manifest, payload
     except (tarfile.TarError, KeyError, TypeError, json.JSONDecodeError, UnicodeDecodeError) as error:
         raise ReleaseError('invalid release archive') from error
 
-def verify_binary(path, expected_version='0.164.0', privacy_verified_sha256=None):
+def verify_binary(path, expected_version='0.164.0', privacy_verified_sha256=None, target=None):
+    target = target or host_target()
+    if target != host_target():
+        raise ReleaseError('Binary execution verification requires a matching host target')
     data = Path(path).read_bytes()
     checksum = digest(data)
     # Cached admission verdict is valid only for these exact bytes. Callers must
@@ -101,17 +228,23 @@ def verify_binary(path, expected_version='0.164.0', privacy_verified_sha256=None
         privacy_check(data)
     elif checksum != privacy_verified_sha256:
         raise ReleaseError('frontend privacy verdict digest mismatch')
-    if len(data) < 32 or data[:8] != bytes.fromhex('cffaedfe0c000001'):
-        raise ReleaseError('frontend architecture must be thin Mach-O arm64')
-    for command in (['codesign', '--verify', '--strict', str(path)], [str(Path(path).resolve()), '--version']):
+    try:
+        check_architecture(data, target)
+    except ValueError as error:
+        raise ReleaseError(str(error)) from error
+    commands = [[str(Path(path).resolve()), '--version']]
+    if TARGETS[target][0] == 'darwin':
+        commands.insert(0, ['codesign', '--verify', '--strict', str(path)])
+    for command in commands:
         result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
         if result.returncode:
             raise ReleaseError('frontend signature or version verification failed')
         if command[-1] == '--version' and result.stdout.strip() != ('codex-cli ' + expected_version).encode():
             raise ReleaseError('frontend version mismatch')
-    info = subprocess.run(['codesign', '-dv', str(path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if info.returncode or b'Signature=adhoc' not in info.stderr:
-        raise ReleaseError('frontend signing policy mismatch')
+    if TARGETS[target][0] == 'darwin':
+        info = subprocess.run(['codesign', '-dv', str(path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if info.returncode or b'Signature=adhoc' not in info.stderr:
+            raise ReleaseError('frontend signing policy mismatch')
     return checksum
 
 def sanitize_binary(source, output):
@@ -159,13 +292,14 @@ def sanitize_binary(source, output):
             'redacted_prefix_count': replacements}
 
 def package(args):
-    binary_hash = verify_binary(args.binary)
+    target = getattr(args, 'target', None) or host_target()
+    binary_hash = verify_binary(args.binary, target=target)
     if not args.provenance or not args.dependency_notices:
         raise ReleaseError('provenance and dependency notices required')
     provenance = json.loads(args.provenance.read_text())
     if provenance.get('binary_sha256') != binary_hash:
         raise ReleaseError('provenance binary digest mismatch')
-    payload = {'bin/codex': args.binary.read_bytes(), 'LICENSE': (ROOT / 'LICENSE').read_bytes(),
+    payload = {entrypoint(target): args.binary.read_bytes(), 'LICENSE': (ROOT / 'LICENSE').read_bytes(),
                'NOTICE': (ROOT / 'NOTICE').read_bytes(), 'DEPENDENCY-NOTICES.txt': args.dependency_notices.read_bytes()}
     for component in args.runtime:
         name, filename = component.split('=', 1)
@@ -173,11 +307,11 @@ def package(args):
             raise ReleaseError('runtime member rejected')
         payload[name] = Path(filename).read_bytes()
     manifest = {'schema': 1, 'release_id': args.release_id, 'official_version': '0.164.0',
-                'target': 'aarch64-apple-darwin', 'layout_version': 1,
+                'target': target, 'layout_version': 1,
                 'source_commit': '6aaac694803004a63c6f393d153c96d22521a6b9',
                 'patch_sha256': digest((ROOT / 'patches/codex-0.164.0-context-details.patch').read_bytes()),
-                'signing': 'ad-hoc; no publisher identity or notarization', 'provenance': provenance,
-                'members': {name: {'sha256': digest(data), 'mode': 0o755 if name in ('bin/codex', 'bootstrap.sh') else 0o644} for name, data in payload.items()}}
+                'signing': signing(target), 'provenance': provenance,
+                'members': {name: {'sha256': digest(data), 'mode': 0o755 if name in ('bin/codex', 'bin/codex.exe', 'bootstrap.sh') else 0o644} for name, data in payload.items()}}
     payload['release.json'] = (json.dumps(manifest, sort_keys=True, indent=2) + '\n').encode()
     for data in payload.values():
         privacy_check(data)
@@ -210,6 +344,7 @@ def main():
     p.add_argument('--binary', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--release-id', required=True)
+    p.add_argument('--target', choices=sorted(TARGETS))
     p.add_argument('--provenance', type=Path)
     p.add_argument('--dependency-notices', type=Path)
     p.add_argument('--runtime', action='append', default=[])

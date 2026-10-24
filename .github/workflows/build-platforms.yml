@@ -1,0 +1,87 @@
+name: Build private platform candidates
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: platform-candidates-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  candidate:
+    # Artifact upload is review storage, never a GitHub Release or publication.
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - runner: windows-2022
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    env:
+      TARGET: ${{ matrix.target }}
+      PYTHONUTF8: '1'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: openai/codex
+          ref: 6aaac694803004a63c6f393d153c96d22521a6b9
+          path: upstream
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Portable command-boundary checks
+        run: python -m unittest discover -s tests -p test_platform_support.py
+      - name: Prepare verified official resources and build inputs
+        run: python scripts/build-platform.py prepare --source upstream --work "$RUNNER_TEMP/custom-build"
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal
+          rustup target add --toolchain 1.99.1 "$TARGET"
+      - name: Linux native MUSL tools
+        if: runner.os == 'Linux'
+        run: bash upstream/.github/scripts/install-musl-build-tools.sh
+      - name: Windows MSVC environment
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./upstream/.github/actions/setup-msvc-env/setup-msvc-env.ps1 -Target $env:TARGET
+      - name: Build and prepare reviewable candidate
+        run: python scripts/build-platform.py build --source upstream --work "$RUNNER_TEMP/custom-build" --output dist
+      - name: Native isolated install and uninstall
+        run: python scripts/accept-platform.py --archive dist/codex-custom.tar.gz --official "$CODEX_CUSTOM_CI_OFFICIAL" --output dist/acceptance.json
+      - name: Keep successful native candidates
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-${{ matrix.target }}
+          path: |
+            dist/codex-custom.tar.gz
+            dist/codex-custom.tar.gz.sha256
+            dist/release.json
+            dist/license-review.json
+            dist/acceptance.json
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Keep incomplete source-review diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-needed-${{ matrix.target }}
+          path: |
+            dist/license-review.json
+            dist/acceptance.json
+          if-no-files-found: ignore
+          retention-days: 7

@@ -2,7 +2,6 @@
 """Verified precompiled installation and launch. Never invokes a source build."""
 import argparse
 from contextlib import contextmanager, nullcontext
-import fcntl
 import importlib.util
 import json
 import os
@@ -15,9 +14,12 @@ import subprocess
 import sys
 import tempfile
 import uuid
+import base64
 
 sys.dont_write_bytecode = True
 import release_artifact as artifact
+portable = artifact
+fcntl = artifact
 
 HERE = Path(__file__).resolve().parent
 updater_path = HERE / 'update-codex-custom.py'
@@ -38,31 +40,30 @@ def state_dir():
 def preflight():
     if sys.version_info < (3, 9):
         raise RuntimeError('Python 3.9+ is required')
-    if platform.system() != 'Darwin' or platform.machine() != 'arm64':
-        raise RuntimeError('Requires macOS Apple Silicon (arm64)')
+    portable.host_target()
     version = package.official_version()
     root, metadata = package.official_package(version)
     native_releases = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex'))) / 'packages/standalone/releases'
     if root.parent != native_releases.resolve():
         raise RuntimeError('Official package must be below CODEX_HOME/packages/standalone/releases for native service mode')
     for item in root.rglob('*'):
-        if item.is_symlink() and root not in item.resolve(strict=True).parents:
+        if portable.is_link(item) and root not in item.resolve(strict=True).parents:
             raise RuntimeError('Official package contains an external resource link')
     return root, metadata, package.package_inventory(root)
 
 
 @contextmanager
 def locked(state, create=False):
-    if state.is_symlink():
+    if portable.is_link(state):
         raise RuntimeError('State directory must not be a symlink')
     if create:
         state.mkdir(parents=True, exist_ok=True)
     if not state.is_dir():
         raise RuntimeError('No managed installation; install a precompiled release first')
     lockpath = state / 'update.lock'
-    if lockpath.is_symlink():
+    if portable.is_link(lockpath):
         raise RuntimeError('Untrusted state lock')
-    with lockpath.open('a') as stream:
+    with lockpath.open('a+') as stream:
         try:
             fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
@@ -71,13 +72,57 @@ def locked(state, create=False):
 
 
 def shim(state):
+    if portable.windows():
+        python = str(Path(sys.executable).resolve())
+        if any(c in python for c in ('%', '"', '\r', '\n')):
+            raise RuntimeError('Python path is not safe for a Windows command launcher')
+        code = ("import os,json,runpy,sys,re;from pathlib import Path;"
+                + 's=Path(' + repr(str(state)) + ');'
+                + "os.environ['CODEX_CUSTOM_STATE_DIR']=str(s);"
+                + "n=json.loads((s/'current.json').read_text())['release'];"
+                + "assert isinstance(n,str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,100}',n);"
+                + "p=s/'releases'/n/'runtime'/'precompiled.py';"
+                + "sys.path.insert(0,str(p.parent));sys.argv=[str(p),'--launch','--',*sys.argv[1:]];"
+                + "runpy.run_path(str(p),run_name='__main__')")
+        encoded = base64.b64encode(code.encode()).decode()
+        return ('@echo off\nrem ' + OWNER + '\n"' + python
+                + '" -c "import base64;exec(base64.b64decode(\'' + encoded + '\'))" %*\n')
     # Freeze this installation's state location, independent of shell environment/checkout.
     return '#!/bin/sh\n# ' + OWNER + '\nexport CODEX_CUSTOM_STATE_DIR=' + shlex.quote(str(state)) + '\nexec python3 ' + shlex.quote(str(state / 'current/runtime/precompiled.py')) + ' --launch -- "$@"\n'
 
 
+def launcher_path(bin_dir):
+    return bin_dir.expanduser().absolute() / ('codex-custom.cmd' if portable.windows() else 'codex-custom')
+
+
+def selection(state):
+    return state / ('current.json' if portable.windows() else 'current')
+
+
+def current_release(state):
+    current = selection(state)
+    if not portable.windows():
+        if not portable.is_link(current):
+            raise RuntimeError('No managed installation; install a precompiled release first')
+        return current.resolve(strict=True)
+    if portable.is_link(current):
+        raise RuntimeError('Untrusted release selection')
+    value = json.loads(current.read_text())
+    name = value.get('release')
+    if not isinstance(name, str) or not artifact.re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,100}', name):
+        raise RuntimeError('Untrusted release selection')
+    return state / 'releases' / name
+
+
+def native_package(release, receipt):
+    if portable.windows():
+        return Path(receipt['official_root']).parent / 'codex-custom' / release.name / 'package'
+    return (release / 'package').resolve(strict=True)
+
+
 def owner_receipt(state):
     marker = state / 'owner.json'
-    if marker.is_symlink():
+    if portable.is_link(marker):
         raise RuntimeError('Untrusted ownership receipt')
     if not marker.exists():
         return None
@@ -90,52 +135,58 @@ def owner_receipt(state):
 
 
 def checked_release(state, release, owner):
-    if (release.parent != state / 'releases' or release.is_symlink()
-            or (release / 'receipt.json').is_symlink()):
+    if (release.parent != state / 'releases' or portable.is_link(release)
+            or portable.is_link((release / 'receipt.json'))):
         raise RuntimeError('Untrusted current release')
     receipt = json.loads((release / 'receipt.json').read_text())
     if (receipt.get('owner') != OWNER or receipt.get('installation_id') != owner.get('installation_id')
             or receipt.get('state') != str(state)):
         raise RuntimeError('Installed receipt ownership changed')
     root = Path(receipt['official_root'])
-    target = (release / 'package').resolve(strict=True)
+    target = native_package(release, receipt)
     expected = root.parent / 'codex-custom' / release.name / 'package'
     if (target != expected or root.parent / 'codex-custom' != Path(owner['package_parent'])
-            or any(item.is_symlink() for item in (expected.parent, expected.parent.parent))):
+            or any(portable.is_link(item) for item in (expected, expected.parent, expected.parent.parent))):
         raise RuntimeError('Installed package ownership mismatch')
     if receipt.get('package_inventory') != package.package_inventory(target):
         raise RuntimeError('Installed receipt or official resources changed; reinstall; use official codex')
     manifest = receipt['manifest']
-    expected_files = set(manifest['members']) | {'receipt.json', 'package', 'codex', 'run.lock'}
+    if manifest['target'] != portable.host_target():
+        raise RuntimeError('Installed release target does not match this computer')
+    expected_files = set(manifest['members']) | {'receipt.json', 'run.lock'} | ({'package.json'} if portable.windows() else {'package', 'codex'})
     for item in release.rglob('*'):
         name = item.relative_to(release).as_posix()
-        if item.is_dir() and not item.is_symlink():
+        if item.is_dir() and not portable.is_link(item):
             if not any(member.startswith(name + '/') for member in manifest['members']):
                 raise RuntimeError('Unexpected installed directory; refusing managed operation')
         elif name not in expected_files:
             raise RuntimeError('Unexpected installed member; refusing managed operation')
-    if not (release / 'codex').is_symlink() or (release / 'codex').readlink() != Path('package/bin/codex'):
+    if portable.windows():
+        pointer = release / 'package.json'
+        if portable.is_link(pointer) or json.loads(pointer.read_text()) != {'path': str(target.resolve(strict=True))}:
+            raise RuntimeError('Installed package pointer ownership mismatch')
+    elif not portable.is_link((release / 'codex')) or (release / 'codex').readlink() != Path('package/bin/codex'):
         raise RuntimeError('Installed frontend link ownership mismatch')
     for name, info in manifest['members'].items():
         # The archive reader already enforced this closed set at installation.
-        if name not in artifact.BASE_MEMBERS | artifact.RUNTIME_MEMBERS:
+        if name not in artifact.BASE_MEMBERS | artifact.RUNTIME_MEMBERS | {'bin/codex.exe'}:
             raise RuntimeError('Installed member manifest rejected')
         item = release / name
-        if any(parent.is_symlink() for parent in (item, *list(item.parents)[:len(Path(name).parts)-1])) or artifact.digest(item.read_bytes()) != info['sha256'] or item.stat().st_mode & 0o777 != info['mode']:
+        if any(portable.is_link(parent) for parent in (item, *list(item.parents)[:len(Path(name).parts)-1])) or artifact.digest(item.read_bytes()) != info['sha256'] or not portable.mode_matches(item, info['mode']):
             raise RuntimeError('Installed runtime integrity check failed')
-    if receipt['package_inventory']['bin/codex']['sha256'] != manifest['members']['bin/codex']['sha256']:
+    entrypoint = portable.entrypoint()
+    if receipt['package_inventory'][entrypoint]['sha256'] != manifest['members'][entrypoint]['sha256']:
         raise RuntimeError('Installed frontend digest mismatch')
-    artifact.verify_binary(target / 'bin/codex', manifest['official_version'],
-                           privacy_verified_sha256=manifest['members']['bin/codex']['sha256'])
+    artifact.verify_binary(target / entrypoint, manifest['official_version'],
+                           privacy_verified_sha256=manifest['members'][entrypoint]['sha256'], target=manifest['target'])
     return receipt
 
 
 def checked_current(state, official=None):
     owner = owner_receipt(state)
-    current = state / 'current'
-    if not owner or not current.is_symlink():
+    if not owner:
         raise RuntimeError('No managed installation; install a precompiled release first')
-    release = current.resolve(strict=True)
+    release = current_release(state)
     receipt = checked_release(state, release, owner)
     if official is not None and (receipt['official_root'], receipt['official_metadata'], receipt['official_inventory']) != (str(official[0]), official[1], official[2]):
         raise RuntimeError('Official package changed; matching precompiled release required')
@@ -149,11 +200,14 @@ def install(archive, checksum, bin_dir, state, lock_held=False):
         raise RuntimeError('Release archive size limit exceeded')
     if not checksum or artifact.digest(archive.read_bytes()) != checksum:
         raise RuntimeError('Release archive SHA-256 mismatch')
-    manifest, payload = artifact.read_archive(archive, metadata['version'])
+    manifest, payload = artifact.read_archive(archive, metadata['version'], metadata['target'])
+    if 'linux' in metadata['target']:
+        if manifest['provenance'].get('official_bwrap_sha256') != package.file_hash(root / 'codex-resources/bwrap'):
+            raise RuntimeError('Linux sandbox resource differs from this release build; matching precompiled release required')
     required = {'runtime/precompiled.py', 'runtime/release_artifact.py', 'runtime/update-codex-custom.py'}
     if not required <= payload.keys():
         raise RuntimeError('Release is missing standalone runtime components')
-    destination = bin_dir.expanduser().absolute() / 'codex-custom'
+    destination = launcher_path(bin_dir)
     expected = shim(state)
     with nullcontext() if lock_held else locked(state, create=True):
         owner = owner_receipt(state)
@@ -163,20 +217,20 @@ def install(archive, checksum, bin_dir, state, lock_held=False):
         if owner and owner.get('launcher') != str(destination):
             raise RuntimeError('Installation is owned by another launcher location')
         exists = os.path.lexists(destination)
-        if exists and (not owner or destination.is_symlink() or not destination.is_file() or destination.read_text() != expected):
+        if exists and (not owner or portable.is_link(destination) or not destination.is_file() or destination.read_text() != expected):
             raise RuntimeError('Destination exists and is not owned; choose another --bin-dir')
         if owner:
             if Path(owner['package_parent']) != root.parent / 'codex-custom':
                 raise RuntimeError('Official package ownership location changed')
-            if os.path.lexists(state / 'current'):
+            if os.path.lexists(selection(state)):
                 checked_current(state)
         installation_id = owner['installation_id'] if owner else uuid.uuid4().hex
         releases = state / 'releases'
         releases.mkdir(exist_ok=True)
-        if releases.is_symlink():
+        if portable.is_link(releases):
             raise RuntimeError('Untrusted releases directory')
         release = Path(tempfile.mkdtemp(prefix=manifest['release_id'] + '-', dir=releases))
-        if (root.parent / 'codex-custom').is_symlink():
+        if portable.is_link((root.parent / 'codex-custom')):
             shutil.rmtree(release)
             raise RuntimeError('Untrusted native custom package parent')
         package_path = root.parent / 'codex-custom' / release.name
@@ -190,8 +244,8 @@ def install(archive, checksum, bin_dir, state, lock_held=False):
                 item.parent.mkdir(parents=True, exist_ok=True)
                 item.write_bytes(data)
                 item.chmod(manifest['members'][name]['mode'])
-            artifact.verify_binary(release / 'bin/codex', metadata['version'])
-            copied = package.stage_package(root, release / 'bin/codex', release)
+            artifact.verify_binary(release / portable.entrypoint(), metadata['version'], target=metadata['target'])
+            copied = package.stage_package(root, release / portable.entrypoint(), release)
             created_package = True
             receipt = dict(owner=OWNER, installation_id=installation_id, state=str(state), manifest=manifest, official_root=str(root), official_metadata=metadata,
                            official_inventory=inventory, package_inventory=copied)
@@ -207,8 +261,11 @@ def install(archive, checksum, bin_dir, state, lock_held=False):
             if not owner:
                 (state / 'owner.json').write_text(json.dumps(dict(owner=OWNER, launcher=str(destination), installation_id=installation_id, package_parent=str(root.parent / 'codex-custom'))) + '\n')
             link = state / ('activate-' + uuid.uuid4().hex)
-            link.symlink_to(release.relative_to(state))
-            os.replace(link, state / 'current')
+            if portable.windows():
+                link.write_text(json.dumps({'release': release.name}) + '\n')
+            else:
+                link.symlink_to(release.relative_to(state))
+            os.replace(link, selection(state))
             activated = True
             print('Precompiled release installed: ' + manifest['release_id'])
         finally:
@@ -233,21 +290,21 @@ def install(archive, checksum, bin_dir, state, lock_held=False):
 def uninstall(state, bin_dir, purge=False):
     with locked(state):
         owner = owner_receipt(state)
-        destination = bin_dir.expanduser().absolute() / 'codex-custom'
+        destination = launcher_path(bin_dir)
         if not owner or owner.get('launcher') != str(destination):
             raise RuntimeError('Unknown installation ownership')
-        if os.path.lexists(destination) and (destination.is_symlink() or not destination.is_file() or destination.read_text() != shim(state)):
+        if os.path.lexists(destination) and (portable.is_link(destination) or not destination.is_file() or destination.read_text() != shim(state)):
             raise RuntimeError('Launcher is not owned; refusing uninstall')
-        if os.path.lexists(state / 'current'):
+        if os.path.lexists(selection(state)):
             checked_current(state)
         leases, releases = [], []
         try:
             if purge:
-                if (state / 'releases').is_symlink():
+                if portable.is_link((state / 'releases')):
                     raise RuntimeError('Untrusted releases directory')
                 for release in sorted((state / 'releases').iterdir()):
                     marker = release / 'receipt.json'
-                    if release.is_symlink() or marker.is_symlink():
+                    if portable.is_link(release) or portable.is_link(marker):
                         raise RuntimeError('Untrusted cleanup receipt')
                     if not marker.is_file():
                         continue  # Unknown directories belong to their owner.
@@ -256,25 +313,30 @@ def uninstall(state, bin_dir, purge=False):
                         continue
                     checked_release(state, release, owner)
                     leasepath = release / 'run.lock'
-                    if leasepath.is_symlink():
+                    if portable.is_link(leasepath):
                         raise RuntimeError('Untrusted run lease')
-                    stream = leasepath.open('a')
+                    stream = leasepath.open('a+')
                     leases.append(stream)
                     try:
                         fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     except BlockingIOError:
                         raise RuntimeError('A custom session is running; exit it before cleanup')
                     releases.append(release)
-                current = state / 'current'
+                current = selection(state)
                 if os.path.lexists(current):
-                    if not current.is_symlink() or current.resolve(strict=True) not in releases:
+                    if current_release(state) not in releases:
                         raise RuntimeError('Untrusted current release; refusing cleanup')
             if os.path.lexists(destination):
                 destination.unlink()
             if purge:
-                (state / 'current').unlink(missing_ok=True)
+                selection(state).unlink(missing_ok=True)
+                if portable.windows():
+                    # State lock prevents new launches while handles are closed
+                    # for Windows deletion. Existing sessions were refused above.
+                    for stream in leases:
+                        stream.close()
                 for release in releases:
-                    target = (release / 'package').resolve(strict=True)
+                    target = native_package(release, json.loads((release / 'receipt.json').read_text()))
                     shutil.rmtree(target)
                     try:
                         target.parent.rmdir()
@@ -294,8 +356,8 @@ def update(state, bin_dir, source):
     # be undone by a pending download. The downloaded installer reuses this lock.
     with locked(state):
         owner = owner_receipt(state)
-        destination = bin_dir.expanduser().absolute() / 'codex-custom'
-        if not owner or owner.get('launcher') != str(destination) or destination.is_symlink() or not destination.is_file() or destination.read_text() != shim(state):
+        destination = launcher_path(bin_dir)
+        if not owner or owner.get('launcher') != str(destination) or portable.is_link(destination) or not destination.is_file() or destination.read_text() != shim(state):
             raise RuntimeError('Launcher is not owned; refusing update')
         release, receipt = checked_current(state)
         if 'bootstrap.py' not in receipt['manifest']['members']:
@@ -317,7 +379,9 @@ def supervise(binary, arguments, environment, lease):
             return
         if child.poll() is not None:
             return
-        if signum in (signal.SIGINT, signal.SIGQUIT) and os.isatty(0):
+        if os.name == 'nt' and signum == signal.SIGINT:
+            return  # The attached Windows console already delivers Ctrl-C to both processes.
+        if signum in (signal.SIGINT, getattr(signal, 'SIGQUIT', signal.SIGINT)) and os.isatty(0):
             try:
                 if os.tcgetpgrp(0) == os.getpgrp() == os.getpgid(child.pid):
                     # The terminal already delivered this signal to the frontend.
@@ -330,7 +394,8 @@ def supervise(binary, arguments, environment, lease):
             pass
 
     try:
-        for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT, signal.SIGQUIT):
+        signals = [getattr(signal, name) for name in ('SIGTERM', 'SIGHUP', 'SIGINT', 'SIGQUIT') if hasattr(signal, name)]
+        for signum in signals:
             previous[signum] = signal.signal(signum, forward)
         # Only the supervisor owns the lease. A frontend-started official daemon
         # must remain independent and must never inherit a release lock.
@@ -363,12 +428,12 @@ def launch(state, arguments):
             if matches:
                 if preflight() != official:
                     raise RuntimeError('Official package changed before launch; retry')
-                binary = release / 'package/bin/codex'
+                binary = native_package(release, receipt) / portable.entrypoint()
                 environment = dict(os.environ)
                 environment.setdefault('CODEX_CUSTOM_STATUS_LINE', STATUS)
-                if (release / 'run.lock').is_symlink():
+                if portable.is_link((release / 'run.lock')):
                     raise RuntimeError('Untrusted run lease')
-                lease = (release / 'run.lock').open('a')
+                lease = (release / 'run.lock').open('a+')
                 fcntl.flock(lease, fcntl.LOCK_SH)
                 break
             owner = owner_receipt(state)

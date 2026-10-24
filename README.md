@@ -15,10 +15,24 @@ Context 95% left (33.8K used / 475K)
 ## 支持范围
 
 - 已有运行验收：macOS Apple Silicon，官方 CLI **0.164.0**，官方 standalone `codex` 包布局 v1。
-- 其他平台、npm/Homebrew 等安装方式尚未支持。官方版本变化后仅取得明确匹配的发行；尚无发行便停止。未来版本须由维护者移植与验收，不宣称已有真实兼容。
-- 默认预编译安装只需要 Python 3.9+、系统 codesign 和匹配官方包；无需 Rust、Cargo、Git 或源码目录。官方包必须位于当前 `CODEX_HOME`（默认 `~/.codex`）的 `packages/standalone/releases` 中。
+- Intel Mac、Linux x64/ARM64、Windows x64 的安装器与构建流程正在准备，尚待各平台真实构建验收；npm/Homebrew 布局尚未支持。官方版本变化后仅取得明确匹配的发行；尚无发行便停止。未来版本须由维护者移植与验收，不宣称已有真实兼容。
+- 默认预编译安装需要 Python 3.9+ 和匹配官方包；macOS 另需系统 codesign；无需 Rust、Cargo、Git 或源码目录。官方包必须位于当前 `CODEX_HOME`（默认 `~/.codex`）的 `packages/standalone/releases` 中。
 - 显式开发者源码构建还需要 Git、Xcode Command Line Tools（含 `strip`、`codesign`）、通过 rustup 安装的 `cargo` 和 `rustup`（在 PATH 中），以及下载上游源码和 Rust 依赖的网络。
 - 更新器根据匹配版本源码的 `codex-rs/rust-toolchain.toml` 安装工具链。0.164.0 使用 Rust 1.99.1。首次构建为大型 Rust 工作区的优化构建，预留数十 GB 空间和较长编译时间；具体开销随机器、缓存而异，尚无全新环境基准。
+
+## 正在准备的其他平台
+
+新增候选目标为 Intel Mac、Linux x64/ARM64 和 Windows x64，详见[平台决定及验收边界](docs/adr/0002-native-platform-candidates.md)。这些目标的安装包尚未经过原生构建和验收，因此当前已验证支持范围仍是上面的 Apple Silicon 版本。
+
+维护者可在私有 GitHub 仓库手动运行 `Build private platform candidates`。它固定上游源码、工具链及官方资源，在对应系统构建，并在临时目录安装、更新、离线启动和卸载；Linux 另检查沙箱。缺失许可文本阻止打包。流程没有公开 Release 或更改仓库可见性的步骤。构建工具需要 Python 3.12+；普通用户仍只需 Python 3.9+，不编译 Rust。显式开发者源码构建入口仍限原有 macOS Apple Silicon 流程。
+
+Windows 成品就绪并发布后，预期使用 PowerShell：
+
+```powershell
+irm https://raw.githubusercontent.com/HezLUO/codex-custom/main/bootstrap.ps1 | iex
+```
+
+这同样是尚未启用的发布后命令格式。Python 需在 PATH，官方程序默认从 LocalAppData 的 OpenAI/Codex 安装目录识别；其他位置使用 `CODEX_OFFICIAL_BIN` 明确指定完整 standalone 包内的 `codex.exe`。定制入口是 `codex-custom.cmd`，默认写入用户 `.local/bin`，按安装提示加入 PATH。Linux 与 Intel Mac 使用下面的 shell 入口；只在存在明确匹配且通过审查的成品时安装。
 
 ## 一条命令下载安装
 

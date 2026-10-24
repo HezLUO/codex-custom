@@ -2,7 +2,6 @@
 """Build the context-details patch for the installed official Codex version."""
 
 import argparse
-import fcntl
 import hashlib
 import json
 import os
@@ -16,6 +15,9 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT / "scripts" if (ROOT / "scripts").is_dir() else ROOT))
+import release_artifact as portable
+fcntl = portable
 PATCH = ROOT / "patches/codex-0.164.0-context-details.patch"
 # Separate source, generated state, and cache. Legacy outputs/work remain untouched.
 INSTALL = Path(os.environ.get("CODEX_CUSTOM_STATE_DIR",
@@ -23,7 +25,7 @@ INSTALL = Path(os.environ.get("CODEX_CUSTOM_STATE_DIR",
 WORK = Path(os.environ.get("CODEX_CUSTOM_CACHE_DIR",
                            str(Path.home() / ".cache/codex-custom"))).expanduser().resolve()
 OFFICIAL = Path(os.environ.get("CODEX_OFFICIAL_BIN",
-                               str(Path.home() / ".local/bin/codex"))).expanduser().absolute()
+                               str(portable.default_official()))).expanduser().absolute()
 BUILD_SCHEMA = 3
 TEST_FILTERS = ["context_details", "status_line_setup", "status_line_style", "status_surface", "local_settings"]
 
@@ -45,7 +47,7 @@ def package_inventory(root):
             receipt[relative] = {"symlink": os.readlink(item)}
         elif item.is_file():
             receipt[relative] = {"sha256": file_hash(item),
-                                 "mode": item.stat().st_mode & 0o777}
+                                 "mode": (0o755 if item.suffix == ".exe" else 0o644) if os.name == "nt" else item.stat().st_mode & 0o777}
     return receipt
 
 
@@ -56,14 +58,14 @@ def official_package(version):
         raise RuntimeError("Expected an official standalone/releases package location")
     metadata = json.loads((root / "codex-package.json").read_text())
     if (metadata.get("layoutVersion") != 1 or metadata.get("version") != version
-            or metadata.get("target") != "aarch64-apple-darwin"
+            or metadata.get("target") != portable.host_target()
             or metadata.get("variant") != "codex"
-            or metadata.get("entrypoint") != "bin/codex"
+            or metadata.get("entrypoint") != portable.entrypoint()
             or metadata.get("resourcesDir") != "codex-resources"
             or metadata.get("pathDir") != "codex-path"
-            or executable != root / "bin/codex"):
-        raise RuntimeError("Expected a matching complete official macOS ARM64 package")
-    for helper in ["bin/codex-code-mode-host", "codex-path/rg"]:
+            or executable != root / portable.entrypoint()):
+        raise RuntimeError("Expected a matching complete official package for this system/architecture")
+    for helper in portable.helpers(portable.host_target()):
         if not os.access(root / helper, os.X_OK):
             raise RuntimeError(f"Official package is missing executable {helper}")
     if not (root / "codex-resources/voice").is_dir():
@@ -83,14 +85,30 @@ def stage_package(official_root, binary, release):
         if package_inventory(package) != before:
             raise RuntimeError("Official package changed during copy")
         # Unlink first: never write through a packaged symlink or retain old signing xattrs.
-        entrypoint = package / "bin/codex"
+        entrypoint = package / portable.entrypoint()
         entrypoint.unlink()
         shutil.copy2(binary, entrypoint)
-        (release / "package").symlink_to(package.resolve(), target_is_directory=True)
-        (release / "codex").symlink_to("package/bin/codex")
+        # The outer voice manifest also seals the app frontend. Its runtime
+        # files remain unchanged; update exactly the replaced frontend digest.
+        voice_manifest = package / 'codex-resources/voice/manifest.json'
+        voice_relative = 'codex-resources/voice/manifest.json'
+        if portable.is_link(voice_manifest) or portable.is_link(voice_manifest.parent):
+            raise RuntimeError('Official voice manifest must not redirect writes')
+        if voice_manifest.is_file():
+            value = json.loads(voice_manifest.read_text())
+            if value.get('sha256', {}).get(portable.entrypoint()) != before[portable.entrypoint()]['sha256']:
+                raise RuntimeError('Official voice manifest frontend digest mismatch')
+            value['sha256'][portable.entrypoint()] = file_hash(entrypoint)
+            voice_manifest.write_text(json.dumps(value, indent=2) + '\n')
+        if portable.windows():
+            (release / "package.json").write_text(json.dumps({"path": str(package.resolve())}) + "\n")
+        else:
+            (release / "package").symlink_to(package.resolve(), target_is_directory=True)
+            (release / "codex").symlink_to("package/bin/codex")
         after = package_inventory(package)
-        if ({k: v for k, v in before.items() if k != "bin/codex"}
-                != {k: v for k, v in after.items() if k != "bin/codex"}):
+        changed = {portable.entrypoint(), voice_relative} if voice_manifest.is_file() else {portable.entrypoint()}
+        if ({k: v for k, v in before.items() if k not in changed}
+                != {k: v for k, v in after.items() if k not in changed}):
             raise RuntimeError("Packaged helpers or resources changed")
         return after
     except BaseException:
