@@ -316,7 +316,16 @@ def rust_test_inputs(source_text):
                          ('COMMIT', 'VERSION', 'TOOLCHAIN', 'TESTS', 'OFFICIAL_PACKAGES') for name in node.targets)]
     helpers = [functions[name] for name in ('run', 'fetch', 'write_environment', 'prepare', 'collect_notices')]
     nodes = [*constants, *helpers, *body[:boundary], tests]
-    return artifact.digest('\n'.join(ast.dump(node, include_attributes=False) for node in nodes).encode())
+    def canonical(node):
+        if isinstance(node, ast.AST):
+            # Python 3.12 adds empty type_params; ast.dump formatting also changes
+            # across Python versions. Empty optional fields carry no Rust input.
+            return dict(kind=type(node).__name__, fields={name: canonical(value)
+                        for name, value in ast.iter_fields(node) if value is not None and value != []})
+        if isinstance(node, list): return [canonical(value) for value in node]
+        if isinstance(node, bytes): return dict(bytes_hex=node.hex())
+        return node
+    return artifact.digest(json.dumps(canonical(nodes), sort_keys=True, separators=(',', ':')).encode())
 
 
 def native_test_evidence(target, source_text=None, patch_bytes=None, *, updater_bytes=None,
@@ -328,7 +337,7 @@ def native_test_evidence(target, source_text=None, patch_bytes=None, *, updater_
     images = {'x86_64-unknown-linux-musl': '20261012.334.1',
               'aarch64-unknown-linux-musl': '20261012.149.1',
               'x86_64-pc-windows-msvc': '20261022.344.1'}
-    expected_inputs = '6c9c07322f51472d17e67f53148ae0b489f3a742e6117295775f19fc2ac67089'
+    expected_inputs = '630b8cf18218151cb4da2761dc0945aa07b9ec1b1d3d9d1962125135d1128d5c'
     expected_patch = '740d23d18e7e18aa67f320ef8bdb6cb0e2cca62544db4578a59c1ef6465e2d76'
     expected_updater = 'aba48af3d3fe419f61cb92c30bd88e59d3711478bd659a3f62d775cbd151d6e7'
     # This reviewed workflow adds only the optional reuse input/argument to the
@@ -339,10 +348,14 @@ def native_test_evidence(target, source_text=None, patch_bytes=None, *, updater_
     updater_bytes = updater_bytes if updater_bytes is not None else (ROOT / 'update-codex-custom.py').read_bytes()
     workflow_bytes = workflow_bytes if workflow_bytes is not None else (ROOT / '.github/workflows/build-platforms.yml').read_bytes()
     image_version = image_version if image_version is not None else os.environ.get('ImageVersion')
-    if (target not in jobs or rust_test_inputs(source_text) != expected_inputs or artifact.digest(patch_bytes) != expected_patch
-            or artifact.digest(updater_bytes) != expected_updater or artifact.digest(workflow_bytes) != expected_workflow
-            or image_version != images[target]):
-        raise RuntimeError('Reviewed native tests do not match these Rust inputs or target; run fresh tests')
+    checks = {'target': target in jobs, 'Rust preparation': rust_test_inputs(source_text) == expected_inputs,
+              'patch': artifact.digest(patch_bytes) == expected_patch,
+              'updater': artifact.digest(updater_bytes) == expected_updater,
+              'workflow': artifact.digest(workflow_bytes) == expected_workflow,
+              'runner image': image_version == images.get(target)}
+    mismatches = [name for name, matches in checks.items() if not matches]
+    if mismatches:
+        raise RuntimeError('Reviewed native tests do not match: ' + ', '.join(mismatches) + '; run fresh tests')
     return dict(status='previous-native-tests-passed', target=target,
                 source_commit='d07e043fec08892a2d233ac183e8eb75f684aab5',
                 run_id=40080647103, job_id=jobs[target], counts=[2, 20, 9, 37, 7],

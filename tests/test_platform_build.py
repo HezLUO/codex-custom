@@ -15,6 +15,19 @@ builder = importlib.util.module_from_spec(spec); spec.loader.exec_module(builder
 
 
 class NoticeGenerationTests(unittest.TestCase):
+    def test_native_test_fingerprint_ignores_new_empty_ast_fields(self):
+        source = (ROOT / 'scripts/build-platform.py').read_text()
+        expected = builder.rust_test_inputs(source)
+        parse = builder.ast.parse
+        def future_parse(text):
+            tree = parse(text)
+            for node in builder.ast.walk(tree):
+                if isinstance(node, builder.ast.FunctionDef): node.future_optional = []
+            return tree
+        with patch.object(builder.ast.FunctionDef, '_fields', (*builder.ast.FunctionDef._fields, 'future_optional')), \
+             patch.object(builder.ast, 'parse', side_effect=future_parse):
+            self.assertEqual(builder.rust_test_inputs(source), expected)
+
     def test_native_test_reuse_requires_the_same_rust_inputs_patch_and_target(self):
         source = (ROOT / 'scripts/build-platform.py').read_text()
         patch_bytes = (ROOT / 'patches/codex-0.164.0-context-details.patch').read_bytes()
