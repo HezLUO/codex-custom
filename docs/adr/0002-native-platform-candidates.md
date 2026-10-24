@@ -28,6 +28,8 @@ Windows 使用拥有明确归属的 `.cmd` 启动器和原子替换的 `current.
 
 `.github/workflows/build-platforms.yml` 仅支持手动执行，权限为 contents:read，没有创建 Release、推送源码或改公开状态的步骤。默认只编译新增的四个 target，既有 Apple Silicon 二进制继续复用，不因安装器变化重复编译。固定上游 commit 与 Rust 工具链；使用原生 runner，固定并核对官方完整包及 V8/Zig 输入，保留上游 MSVC 栈和 CRT 参数，并映射构建路径。构建工具需要 Python 3.12+，与普通用户的运行依赖分开。
 
+官方包与 checksum 清单摘要已按官方 0.164.0 Release 的资产记录固定；上游同名资产变化会停止构建。Linux 沙箱的 userns/AppArmor 前提只设置于临时 GitHub runner，不在用户电脑执行。PowerShell 内嵌下载逻辑由 shell 中的单一来源生成，`scripts/sync-bootstraps.py --check` 防止安全修正只进入其中一份。
+
 每个平台重新收集其 Cargo 解析图、源许可及标准库通知，包含构建依赖，不复用 Mac 图冒充 Windows/Linux 图。已核实的许可补充固定原文 URL 和 SHA-256；未知缺失文本阻止生成安装包，收集结果留作审查。CI 成品仍是候选，需要对应平台的通知复核，不能直接公开分发。
 
 `scripts/accept-platform.py` 在临时 HOME/CODEX_HOME 与复制的官方包中，运行安装、版本、resume 参数、HTTP 更新、断网启动、重复卸载、重装和清理，核对官方及合成用户资料未改动，保留未知目录同级文件。Linux 另运行实际 bwrap 沙箱。它不提供账号、不请求模型，不把启动器不含源码路径描述为 OS 级源码读取拒绝。完整 TUI、voice 功能、Windows 普通权限与控制台信号仍需实际验收，不能由架构夹具代替。

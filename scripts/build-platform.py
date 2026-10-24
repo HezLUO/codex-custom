@@ -23,6 +23,13 @@ COMMIT = '6aaac694803004a63c6f393d153c96d22521a6b9'
 VERSION = '0.164.0'
 TOOLCHAIN = '1.99.1'
 TESTS = ['context_details', 'status_line_setup', 'status_line_style', 'status_surface', 'local_settings']
+OFFICIAL_PACKAGES = {
+    'aarch64-apple-darwin': 'dd99e9092270691a67bdde7be04ac283dea9da8e86cbde356c2cc851a79205fa',
+    'x86_64-apple-darwin': 'cfb2a9988d7ea448511166a35789af07a0065d1117db54350b17d46cf03d0294',
+    'x86_64-unknown-linux-musl': '3ec55053109608d5038f7e50750f7d25f768dfd740fef071aa710e2559b63aac',
+    'aarch64-unknown-linux-musl': '5918add6c7e9cf1e14a9af1b4c0f4bf1d24a43903faac26df5dc4c019ea91bd5',
+    'x86_64-pc-windows-msvc': '700116be3143576d006467af8576f7f4c9dada1feddfdb7f69743bfde0997018',
+}
 
 
 def run(command, cwd=None, capture=False):
@@ -64,9 +71,11 @@ def prepare(source, work, target):
     base = 'https://github.com/openai/codex/releases/download/rust-v' + VERSION + '/'
     name = 'codex-package-' + target + '.tar.gz'
     fetch(base + 'codex-package_SHA256SUMS', work / 'official-checksums.txt', 1024 * 1024)
+    if artifact.digest((work / 'official-checksums.txt').read_bytes()) != '28fa3c96ec1b66c34c0a5b8ac26e9c4d2dcbb82d0b0d66bd0a8108c0f4b1e522':
+        raise RuntimeError('Official checksum manifest changed from reviewed release')
     matches = [line.split()[0] for line in (work / 'official-checksums.txt').read_text(encoding='utf-8').splitlines()
                if len(line.split()) == 2 and line.split()[1].lstrip('*') == name]
-    if len(matches) != 1 or not re.fullmatch('[0-9a-f]{64}', matches[0]):
+    if len(matches) != 1 or matches[0] != OFFICIAL_PACKAGES[target]:
         raise RuntimeError('No exact official package checksum')
     archive = work / 'official.tar.gz'; fetch(base + name, archive)
     if artifact.digest(archive.read_bytes()) != matches[0]:
@@ -126,9 +135,9 @@ def collect_notices(metadata, source, out, target):
     texts = ['Conservative target dependency notices for ' + target + '\nIncludes host/build dependencies; not exact linker reachability.\n']
     missing, records = [], []
     recovered = {
-        'cookie-factory': ('https://raw.githubusercontent.com/rust-bakery/cookie-factory/d36b805dbd7dd65f2df947235c5bcc573afe2c76/LICENSES/MIT.txt', 'd09216dc1ea5f273997667935a8d6514d80f00b89fb6954ecc3a43e0a6e360de'),
-        'fax': ('https://raw.githubusercontent.com/pdf-rs/fax/5d70a161e33b62305f8bce7af3f7fbd011cfaf5d/LICENSE', '7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff'),
-        'fax_derive': ('https://raw.githubusercontent.com/pdf-rs/fax/5d70a161e33b62305f8bce7af3f7fbd011cfaf5d/LICENSE', '7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff'),
+        ('cookie-factory', '0.3.3'): ('https://raw.githubusercontent.com/rust-bakery/cookie-factory/d36b805dbd7dd65f2df947235c5bcc573afe2c76/LICENSES/MIT.txt', 'd09216dc1ea5f273997667935a8d6514d80f00b89fb6954ecc3a43e0a6e360de'),
+        ('fax', '0.2.6'): ('https://raw.githubusercontent.com/pdf-rs/fax/5d70a161e33b62305f8bce7af3f7fbd011cfaf5d/LICENSE', '7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff'),
+        ('fax_derive', '0.2.0'): ('https://raw.githubusercontent.com/pdf-rs/fax/5d70a161e33b62305f8bce7af3f7fbd011cfaf5d/LICENSE', '7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff'),
     }
     for key in sorted(selected):
         p = packages[key]; location = Path(p['manifest_path']).parent
@@ -139,6 +148,9 @@ def collect_notices(metadata, source, out, target):
             match = re.fullmatch(r'git\+(https://[^?#]+)(?:\?[^#]*)?#([0-9a-f]{40})', origin)
             if not match: raise RuntimeError('Git dependency source must include its resolved revision')
             origin = match.group(1).removesuffix('.git') + '/tree/' + match.group(2)
+        # A legitimate crate name otherwise resembles a personal home path.
+        # Normalize before both the notice and its inventory are serialized.
+        origin = origin.replace('crates.io/api/v1/crates/home/', 'crates.io/api/v1/crates/h%6fme/')
         texts.append('\n' + '=' * 78 + '\n' + identity + '\nSource: ' + origin + '\nDeclared license: ' + str(p.get('license')) + '\nPublished authors: ' + json.dumps(p.get('authors', []), ensure_ascii=False) + '\n')
         files = []
         for path in sorted(location.rglob('*')):
@@ -152,15 +164,15 @@ def collect_notices(metadata, source, out, target):
                 try: text = path.read_text(encoding='utf-8')
                 except UnicodeDecodeError: continue
                 files.append((relative, text))
-        if p['name'] in recovered and p['version'] in ('0.3.3', '0.2.6', '0.2.0'):
-            url, checksum = recovered[p['name']]
+        if (p['name'], p['version']) in recovered:
+            url, checksum = recovered[p['name'], p['version']]
             with tempfile.TemporaryDirectory() as temporary:
                 path = Path(temporary) / 'license'; fetch(url, path, 1024 * 1024)
                 if artifact.digest(path.read_bytes()) != checksum: raise RuntimeError('Recovered notice checksum mismatch')
                 if p['name'] != 'cookie-factory': texts.append('Notice recovered from accepted immediate-child upstream license-only repair; not originally packaged.\n')
                 files.append((url, path.read_text(encoding='utf-8')))
         if not files and p['name'] == 'debugserver-types' and p['version'] == '0.5.0':
-            url, checksum = recovered['cookie-factory']
+            url, checksum = recovered['cookie-factory', '0.3.3']
             with tempfile.TemporaryDirectory() as temporary:
                 path = Path(temporary) / 'mit'; fetch(url, path, 1024 * 1024)
                 if artifact.digest(path.read_bytes()) != checksum: raise RuntimeError('Canonical MIT terms checksum mismatch')
@@ -193,7 +205,7 @@ def collect_notices(metadata, source, out, target):
         parser = Text(); parser.feed(standard.read_text(encoding='utf-8')); texts.append('\nRust standard library notices\n' + ''.join(parser.parts))
     else:
         missing.append({'name': 'rust-standard-library', 'version': TOOLCHAIN})
-    assets = [source / 'third_party/wezterm/LICENSE', *sorted((source / 'codex-rs/skills/src/assets/samples').glob('**/*LICENSE*'))]
+    assets = [source / 'third_party/wezterm/LICENSE', *sorted(p for p in (source / 'codex-rs/skills/src/assets/samples').rglob('*') if p.is_file() and 'license' in p.name.lower())]
     for path in assets:
         if path.is_file(): texts.append('\nEmbedded asset: ' + path.relative_to(source).as_posix() + '\n' + path.read_text(encoding='utf-8') + '\n')
     notice = '\n'.join(texts).replace('crates.io/api/v1/crates/home/', 'crates.io/api/v1/crates/h%6fme/')

@@ -44,7 +44,10 @@ jobs:
         with:
           python-version: '3.12'
       - name: Portable command-boundary checks
-        run: python -m unittest discover -s tests -p test_platform_support.py
+        run: |
+          python scripts/sync-bootstraps.py --check
+          python -m unittest discover -s tests -p test_platform_support.py
+          python -m unittest discover -s tests -p test_platform_build.py
       - name: Prepare verified official resources and build inputs
         run: python scripts/build-platform.py prepare --source upstream --work "$RUNNER_TEMP/custom-build"
       - name: Rust toolchain
@@ -60,6 +63,15 @@ jobs:
         run: ./upstream/.github/actions/setup-msvc-env/setup-msvc-env.ps1 -Target $env:TARGET
       - name: Build and prepare reviewable candidate
         run: python scripts/build-platform.py build --source upstream --work "$RUNNER_TEMP/custom-build" --output dist
+      - name: Linux disposable runner sandbox prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          if [ -f /proc/sys/kernel/unprivileged_userns_clone ]; then
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
+          fi
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
       - name: Native isolated install and uninstall
         run: python scripts/accept-platform.py --archive dist/codex-custom.tar.gz --official "$CODEX_CUSTOM_CI_OFFICIAL" --output dist/acceptance.json
       - name: Keep successful native candidates

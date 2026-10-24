@@ -96,7 +96,10 @@ def main():
             siblings = []
             for parent in native.iterdir():
                 path = parent / 'foreign-notes'; path.write_text('not owned'); siblings.append(path)
-            invoke('--uninstall'); invoke('--uninstall')
+            invoke('--uninstall')
+            # The entrypoint is deliberately gone; repeat through the management
+            # command with the same explicit state/bin location.
+            call([sys.executable, ROOT / 'scripts/install.py', '--uninstall', '--bin-dir', commands])
             if launcher.exists(): raise RuntimeError('Owned launcher not removed')
             call([sys.executable, ROOT / 'scripts/install.py', '--archive', args.archive.resolve(), '--sha256', artifact.digest(args.archive.read_bytes()), '--bin-dir', commands])
             invoke('--uninstall', '--purge')
