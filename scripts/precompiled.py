@@ -308,8 +308,9 @@ def install(archive, checksum, bin_dir, state, lock_held=False):
                 if (previous_shim is not None and not portable.is_link(destination)
                         and destination.is_file() and destination.read_bytes() == expected.encode()):
                     replace_shim(destination, previous_shim, expected=expected.encode())
-                if created_shim:
-                    destination.unlink(missing_ok=True)
+                if (created_shim and not portable.is_link(destination)
+                        and destination.is_file() and destination.read_text() == expected):
+                    destination.unlink()
                 if not owner:
                     (state / 'owner.json').unlink(missing_ok=True)
                 shutil.rmtree(release, ignore_errors=True)

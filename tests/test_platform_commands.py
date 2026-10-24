@@ -116,6 +116,18 @@ class CrossTargetCommands(unittest.TestCase):
         self.assertEqual(launcher.read_bytes(), b'foreign-sentinel')
         self.assertEqual(pointer.read_bytes(), before)
 
+    def test_first_activation_failure_keeps_a_foreign_launcher_replacement(self):
+        target = 'x86_64-pc-windows-msvc'; self.prepare(target)
+        launcher = self.bin / 'codex-custom.cmd'
+        adapter = Path(self.env['PYTHONPATH']) / 'sitecustomize.py'
+        text = adapter.read_text().replace("str(destination).endswith('/current')", "str(destination).endswith(('/current', '/current.json'))")
+        adapter.write_text(text.replace("        raise PermissionError('fixture activation denied')",
+            "        Path(os.environ['FIXTURE_FOREIGN_ON_ROLLBACK']).write_bytes(b'foreign-first-install')\n        raise PermissionError('fixture activation denied')"))
+        self.env.update(FIXTURE_FAIL_ACTIVATION='1', FIXTURE_FOREIGN_ON_ROLLBACK=str(launcher))
+        result = self.command(*self.payload(target)); self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(launcher.read_bytes(), b'foreign-first-install')
+        self.assertFalse((self.root / 'state/current.json').exists())
+
     def test_linux_wrong_build_time_bwrap_digest_is_refused_before_activation(self):
         self.prepare('x86_64-unknown-linux-musl')
         result = self.command(*self.payload('x86_64-unknown-linux-musl', bad_bwrap=True))
