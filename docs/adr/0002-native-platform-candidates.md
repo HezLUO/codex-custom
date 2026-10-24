@@ -30,10 +30,10 @@ Windows 使用拥有明确归属的 `.cmd` 启动器和原子替换的 `current.
 
 官方包与 checksum 清单摘要已按官方 0.164.0 Release 的资产记录固定；上游同名资产变化会停止构建。Linux 沙箱的 userns/AppArmor 前提只设置于临时 GitHub runner，不在用户电脑执行。PowerShell 内嵌下载逻辑由 shell 中的单一来源生成，`scripts/sync-bootstraps.py --check` 防止安全修正只进入其中一份。
 
-每个平台重新收集其 Cargo 解析图、源许可及标准库通知，包含构建依赖，不复用 Mac 图冒充 Windows/Linux 图。已核实的许可补充固定原文 URL 和 SHA-256；未知缺失文本阻止生成安装包，收集结果留作审查。CI 成品仍是候选，需要对应平台的通知复核，不能直接公开分发。
+每个平台重新收集其 Cargo 解析图、源许可及标准库通知，包含构建依赖，不复用 Mac 图冒充 Windows/Linux 图。已核实的许可补充固定原文 URL 和 SHA-256；未知缺失文本阻止生成安装包，收集结果留作审查。CI 成品仍是候选，需要对应平台的通知复核；公开仓库中的日志与候选产物可见，不能直接作为已验证的正式发行。
 
 `scripts/accept-platform.py` 在临时 HOME/CODEX_HOME 与复制的官方包中，运行安装、版本、resume 参数、HTTP 更新、断网启动、重复卸载、重装和清理，核对官方及合成用户资料未改动，保留未知目录同级文件。Linux 另运行实际 bwrap 沙箱。它不提供账号、不请求模型，不把启动器不含源码路径描述为 OS 级源码读取拒绝。完整 TUI、voice 功能、Windows 普通权限与控制台信号仍需实际验收，不能由架构夹具代替。
 
-本地完成改动与审查后，远程构建需要先将审查过的源码推送到私有 GitHub 仓库并运行 Actions。此前授权仅限本地整理，故这一步另行取得授权；不因此开放仓库或发布 Release。原生构建、许可复核与验收通过后，才扩大 README 的实际支持声明。新增平台必须实际编译，和此前仅搬动源码目录无需重编译的情况不同。
+最初获准推送至私有仓库并运行 Actions；在完成源码、提交历史、Issues（包括历史编辑版本）的隐私复查，并移除旧的未执行构建记录后，用户另行确认公开仓库，使用免费标准 runner 构建。公开源码与候选构建不代表正式 Release 获准发布。原生构建、许可复核与验收通过后，才扩大 README 的实际支持声明。新增平台必须实际编译，和此前仅搬动源码目录无需重编译的情况不同。
 
 实现依据：[固定上游 target 定义](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/scripts/codex_package/targets.py)、[完整包布局](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/scripts/codex_package/layout.py)、[Linux bwrap 校验](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-rs/linux-sandbox/src/bundled_bwrap.rs)、[voice 外层清单](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/third_party/voice/assemble_package.py)、[Windows 官方安装器](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/scripts/install/install.ps1)、[GitHub runner 配置](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)。

@@ -1,4 +1,4 @@
-name: Build private platform candidates
+name: Build platform candidates
 on:
   workflow_dispatch:
 permissions:
@@ -8,7 +8,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   candidate:
-    # Artifact upload is review storage, never a GitHub Release or publication.
+    # Public candidate artifacts require review; uploading does not create a Release.
     strategy:
       fail-fast: false
       max-parallel: 2

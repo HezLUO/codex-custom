@@ -8,9 +8,9 @@ Context 95% left (33.8K used / 475K)
 
 当前上下文用量来自官方 `last_token_usage`，使用官方百分比公式；累计会话 token 不作为当前用量。上下文未知或更新尚未完成时，字段按补丁规则隐藏。
 
-这是可审查的本地开源候选版本，与 OpenAI 无隶属或背书关系。项目使用 HezLUO/codex-custom 私有 GitHub 仓库管理任务，源码尚未推送或公开，许可方案尚待审定。已确定的发行目标是通过一条终端命令下载安装经过验证的预编译版本，源码构建保留为可选方式，见[安装方式决定](docs/adr/0001-precompiled-installation.md)。
+这是可审查的开源项目，与 OpenAI 无隶属或背书关系。源码与任务记录已在 [HezLUO/codex-custom](https://github.com/HezLUO/codex-custom) 公开，采用 Apache-2.0；预编译安装包仍在构建和验证，尚未正式发布。已确定的发行目标是通过一条终端命令下载安装经过验证的预编译版本，源码构建保留为可选方式，见[安装方式决定](docs/adr/0001-precompiled-installation.md)。
 
-已实现预编译候选的下载、本地安装、匹配更新、离线启动及安全卸载。目前没有公开安装地址，实际下载验收使用本地测试服务；源码与产物保留在本机供审查。
+已实现预编译候选的下载、本地安装、匹配更新、离线启动及安全卸载。目前尚无正式发行的安装包，已有实际下载验收使用本地测试服务；公开源码不代表预编译安装已可用。
 
 ## 支持范围
 
@@ -24,7 +24,7 @@ Context 95% left (33.8K used / 475K)
 
 新增候选目标为 Intel Mac、Linux x64/ARM64 和 Windows x64，详见[平台决定及验收边界](docs/adr/0002-native-platform-candidates.md)。这些目标的安装包尚未经过原生构建和验收，因此当前已验证支持范围仍是上面的 Apple Silicon 版本。
 
-维护者可在私有 GitHub 仓库手动运行 `Build private platform candidates`。它固定上游源码、工具链及官方资源，在对应系统构建，并在临时目录安装、更新、离线启动和卸载；Linux 另检查沙箱。缺失许可文本阻止打包。流程没有公开 Release 或更改仓库可见性的步骤。构建工具需要 Python 3.12+；普通用户仍只需 Python 3.9+，不编译 Rust。显式开发者源码构建入口仍限原有 macOS Apple Silicon 流程。
+维护者可在 GitHub 仓库手动运行 `Build platform candidates`。它固定上游源码、工具链及官方资源，在对应系统构建，并在临时目录安装、更新、离线启动和卸载；Linux 另检查沙箱。缺失许可文本阻止打包。构建日志及候选产物在公开仓库中可见；流程不创建正式 Release。构建工具需要 Python 3.12+；普通用户仍只需 Python 3.9+，不编译 Rust。显式开发者源码构建入口仍限原有 macOS Apple Silicon 流程。
 
 Windows 成品就绪并发布后，预期使用 PowerShell：
 
@@ -36,7 +36,7 @@ irm https://raw.githubusercontent.com/HezLUO/codex-custom/main/bootstrap.ps1 | i
 
 ## 一条命令下载安装
 
-以下地址是发布后的命令格式；仓库仍为私有、源码与发行尚未上传，因此目前不能从该公开地址安装：
+以下地址是安装包正式发布后的命令格式；引导脚本已公开，但匹配的 Release 产物尚未上传，因此目前还不能完成在线安装：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/HezLUO/codex-custom/main/bootstrap.sh | sh
@@ -160,4 +160,4 @@ python3 scripts/audit-release.py
 
 ## 许可与归属
 
-候选项目采用 Apache-2.0，见 [LICENSE](LICENSE)。补丁包含来自 OpenAI Codex 的上下文，保留上游 [NOTICE](NOTICE)；修改说明见 [维护说明](docs/MAINTENANCE.md)。上游源码为 [openai/codex](https://github.com/openai/codex)，基线 tag 为 `rust-v0.164.0`。许可证及通知保留方案依据 [Apache-2.0 第 4 节](https://www.apache.org/licenses/LICENSE-2.0)。实际候选已附依赖通知并完成本地检查；四个精确依赖版本缺少独立 MIT 许可文本，仍需维护者在公开分发前审定。ad hoc 签名不认证发布者、未公证。源码审计和本地验收均不代表公开发布授权。
+候选项目采用 Apache-2.0，见 [LICENSE](LICENSE)。补丁包含来自 OpenAI Codex 的上下文，保留上游 [NOTICE](NOTICE)；修改说明见 [维护说明](docs/MAINTENANCE.md)。上游源码为 [openai/codex](https://github.com/openai/codex)，基线 tag 为 `rust-v0.164.0`。许可证及通知保留方案依据 [Apache-2.0 第 4 节](https://www.apache.org/licenses/LICENSE-2.0)。已有 Apple Silicon 候选已附依赖通知并完成本地检查；此前四项 MIT 依赖已完成来源复核，三项补入上游原文，另一项保留已发布作者及完整条款并明确来源限制。新增平台的依赖通知仍需按实际构建复核。ad hoc 签名不认证发布者、未公证。源码审计和本地验收均不代表公开发布授权。
