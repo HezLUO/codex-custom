@@ -85,10 +85,10 @@ def shim(state):
                 + "sys.path.insert(0,str(p.parent));sys.argv=[str(p),'--launch','--',*sys.argv[1:]];"
                 + "runpy.run_path(str(p),run_name='__main__')")
         encoded = base64.b64encode(code.encode()).decode()
-        # cmd must parse the whole block before Python can remove this launcher.
-        # exit /b without a value preserves Python's exit status after deletion.
-        return ('@echo off\nrem ' + OWNER + '\n(\n"' + python
-                + '" -c "import base64;exec(base64.b64decode(\'' + encoded + '\'))" %*\nexit /b\n)\n')
+        # Leave batch context while the file still exists, then run Python from
+        # the already parsed command chain. Python may safely remove this file.
+        return ('@echo off\nrem ' + OWNER + '\n(goto) 2>nul & "' + python
+                + '" -c "import base64;exec(base64.b64decode(\'' + encoded + '\'))" %*\n')
     # Freeze this installation's state location, independent of shell environment/checkout.
     return '#!/bin/sh\n# ' + OWNER + '\nexport CODEX_CUSTOM_STATE_DIR=' + shlex.quote(str(state)) + '\nexec python3 ' + shlex.quote(str(state / 'current/runtime/precompiled.py')) + ' --launch -- "$@"\n'
 
