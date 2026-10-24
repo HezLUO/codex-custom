@@ -6,8 +6,8 @@
 | --- | --- | --- | --- |
 | Apple Silicon Mac | aarch64-apple-darwin | macos-15 | 既有 `.7` 候选已验证；新运行组件另行验收 |
 | Intel Mac | x86_64-apple-darwin | macos-15-intel | 待原生构建与验收 |
-| Linux x64 | x86_64-unknown-linux-musl | ubuntu-24.04 | 待原生构建与验收 |
-| Linux ARM64 | aarch64-unknown-linux-musl | ubuntu-24.04-arm | 待原生构建与验收 |
+| Linux x64 | x86_64-unknown-linux-musl | ubuntu-24.04 | [原生构建、隔离生命周期及成品复核通过](https://github.com/HezLUO/codex-custom/actions/runs/40088351134) |
+| Linux ARM64 | aarch64-unknown-linux-musl | ubuntu-24.04-arm | [原生构建、隔离生命周期及成品复核通过](https://github.com/HezLUO/codex-custom/actions/runs/40088705811) |
 | Windows x64 | x86_64-pc-windows-msvc | windows-2022 | 待原生构建与验收 |
 
 平台范围来自用户选择：Intel Mac、Linux 和 Windows 都增加。Windows ARM64、Linux 32 位和任意 Linux 发行版的兼容保证不在本轮声明内。Linux 主程序使用与官方发行相同的 MUSL target；官方 voice 仍依赖 GNU/glibc 环境，不能据此声称支持全部 MUSL-only 系统。
