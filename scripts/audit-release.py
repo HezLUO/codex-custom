@@ -7,6 +7,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_FILES = {
+    'scripts/native-license-sources.json', 'docs/NATIVE-LICENSE-SOURCES.md',
     'scripts/privacy-diagnostic-cert.pem',
     'scripts/sync-bootstraps.py', 'tests/test_platform_build.py',
     '.github/workflows/build-platforms.yml', 'bootstrap.ps1', 'scripts/build-platform.py',

@@ -15,6 +15,94 @@ builder = importlib.util.module_from_spec(spec); spec.loader.exec_module(builder
 
 
 class NoticeGenerationTests(unittest.TestCase):
+    def test_reviewed_license_requires_exact_bytes_and_declared_option(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); source = root / 'source'; source.mkdir()
+            (source / 'LICENSE').write_text('fixture complete Apache terms')
+            dependency = root / 'dependency'; dependency.mkdir()
+            original = b'fixture original licensing declaration and attribution'
+            url = 'https://raw.githubusercontent.com/example/fixture/' + 'a' * 40 + '/LICENSE'
+            scripts = root / 'scripts'; scripts.mkdir()
+            (scripts / 'native-license-sources.json').write_text(json.dumps({'fixture-dep@1.0.0': [
+                dict(url=url, sha256=builder.artifact.digest(original), selected_license='Apache-2.0')]}))
+            tool = root / 'toolchain'; standard = tool / 'share/doc/rust'; standard.mkdir(parents=True)
+            (standard / 'COPYRIGHT-library.html').write_text('<p>fixture Rust notices</p>')
+            dep = dict(id='dep', name='fixture-dep', version='1.0.0',
+                       source='registry+https://github.com/rust-lang/crates.io-index',
+                       manifest_path=str(dependency / 'Cargo.toml'), license='MIT OR Apache-2.0', authors=[])
+            metadata = {'packages': [dict(id='cli', name='codex-cli', version='0.164.0', source=None,
+                         manifest_path=str(source / 'Cargo.toml'), license='Apache-2.0', authors=[]), dep],
+                         'resolve': {'nodes': [dict(id='cli', deps=[{'pkg': 'dep'}]), dict(id='dep', deps=[])]}}
+            for index, bad_bytes, license_expression in [(0, False, 'MIT OR Apache-2.0'), (1, True, 'MIT OR Apache-2.0'), (2, False, 'MIT')]:
+                output = root / str(index); output.mkdir(); dep['license'] = license_expression
+                def fetch(_url, path, _limit):
+                    self.assertEqual(_url, url)
+                    path.write_bytes(b'fixture changed bytes' if bad_bytes else original)
+                with patch.object(builder, 'ROOT', root), patch.object(builder, 'fetch', side_effect=fetch), patch.object(builder, 'run', return_value=str(tool / 'bin/rustc')):
+                    if index:
+                        with self.assertRaises(RuntimeError):
+                            builder.collect_notices(metadata, source, output, 'x86_64-unknown-linux-musl')
+                        self.assertFalse((output / 'DEPENDENCY-NOTICES.txt').exists())
+                    else:
+                        report = builder.collect_notices(metadata, source, output, 'x86_64-unknown-linux-musl')
+                        self.assertEqual(report['missing_original_texts'], [])
+                        notice = (output / 'DEPENDENCY-NOTICES.txt').read_text()
+                        self.assertIn(original.decode(), notice)
+                        self.assertIn('Explicitly reviewed Apache-2.0 terms', notice)
+
+    def test_declared_workspace_license_is_read_but_external_file_is_not(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); source = root / 'source'; source.mkdir()
+            (source / 'LICENSE').write_text('fixture Apache terms')
+            workspace = root / 'dependency'; workspace.mkdir(); (workspace / '.git').mkdir()
+            member = workspace / 'member'; member.mkdir()
+            terms = workspace / 'terms.custom'; terms.write_text('fixture original MIT terms and attribution')
+            outside = root / 'outside.custom'; outside.write_text('fixture external private data')
+            (member / 'copying.rs').write_text('pub struct NSCopyingFixture;')
+            tool = root / 'toolchain'; standard = tool / 'share/doc/rust'; standard.mkdir(parents=True)
+            (standard / 'COPYRIGHT-library.html').write_text('<p>fixture Rust notices</p>')
+            package = dict(id='dependency', name='fixture-workspace-dependency', version='1.0.0',
+                           source='git+https://github.com/example/fixture#' + 'a' * 40,
+                           manifest_path=str(member / 'Cargo.toml'), license='MIT', authors=[])
+            metadata = {'packages': [dict(id='cli', name='codex-cli', version='0.164.0', source=None,
+                         manifest_path=str(source / 'Cargo.toml'), license='Apache-2.0', authors=[]), package],
+                         'resolve': {'nodes': [dict(id='cli', deps=[{'pkg': 'dependency'}]), dict(id='dependency', deps=[])]}}
+            for index, license_file in enumerate((terms, outside)):
+                package['license_file'] = str(license_file)
+                output = root / str(index); output.mkdir()
+                with patch.object(builder, 'run', return_value=str(tool / 'bin/rustc')):
+                    report = builder.collect_notices(metadata, source, output, 'x86_64-unknown-linux-musl')
+                notice = (output / 'DEPENDENCY-NOTICES.txt').read_text()
+                if index == 0:
+                    self.assertEqual(report['missing_original_texts'], [])
+                    self.assertIn(terms.read_text(), notice)
+                else:
+                    self.assertEqual(report['missing_original_texts'][0]['name'], package['name'])
+                    self.assertNotIn(outside.read_text(), notice)
+
+    def test_original_line_comment_attribution_retained_with_apache_option(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); source = root / 'source'; source.mkdir()
+            (source / 'LICENSE').write_text('fixture complete Apache terms')
+            dependency = root / 'dependency'; dependency.mkdir()
+            header = '// Copyright fixture original contributors\n// Licensed under Apache-2.0 or MIT, at your option.\n'
+            (dependency / 'lib.rs').write_text(header + '\npub fn fixture() {}\n')
+            tool = root / 'toolchain'; standard = tool / 'share/doc/rust'; standard.mkdir(parents=True)
+            (standard / 'COPYRIGHT-library.html').write_text('<p>fixture Rust notices</p>')
+            metadata = {'packages': [dict(id='cli', name='codex-cli', version='0.164.0', source=None,
+                         manifest_path=str(source / 'Cargo.toml'), license='Apache-2.0', authors=[]),
+                         dict(id='dep', name='fixture-line-header', version='1.0.0',
+                         source='registry+https://github.com/rust-lang/crates.io-index',
+                         manifest_path=str(dependency / 'Cargo.toml'), license='MIT OR Apache-2.0', authors=[])],
+                         'resolve': {'nodes': [dict(id='cli', deps=[{'pkg': 'dep'}]), dict(id='dep', deps=[])]}}
+            output = root / 'out'; output.mkdir()
+            with patch.object(builder, 'run', return_value=str(tool / 'bin/rustc')):
+                report = builder.collect_notices(metadata, source, output, 'x86_64-unknown-linux-musl')
+            self.assertEqual(report['missing_original_texts'], [])
+            notice = (output / 'DEPENDENCY-NOTICES.txt').read_text()
+            self.assertIn(header, notice)
+            self.assertIn('Selected Apache-2.0 full terms', notice)
+
     def test_macho_and_pe_constant_sections_keep_their_layout(self):
         prefix = '/' + 'home/fixture-ci'
         payload = (prefix + '/source.cc\0').encode()

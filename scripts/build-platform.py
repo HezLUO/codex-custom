@@ -134,11 +134,27 @@ def collect_notices(metadata, source, out, target):
         selected.add(key); pending.extend(d['pkg'] for d in nodes[key]['deps'])
     texts = ['Conservative target dependency notices for ' + target + '\nIncludes host/build dependencies; not exact linker reachability.\n']
     missing, records = [], []
+    reviewed_sources = json.loads((ROOT / 'scripts/native-license-sources.json').read_text(encoding='utf-8'))
     recovered = {
         ('cookie-factory', '0.3.3'): ('https://raw.githubusercontent.com/rust-bakery/cookie-factory/d36b805dbd7dd65f2df947235c5bcc573afe2c76/LICENSES/MIT.txt', 'd09216dc1ea5f273997667935a8d6514d80f00b89fb6954ecc3a43e0a6e360de'),
         ('fax', '0.2.6'): ('https://raw.githubusercontent.com/pdf-rs/fax/5d70a161e33b62305f8bce7af3f7fbd011cfaf5d/LICENSE', '7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff'),
         ('fax_derive', '0.2.0'): ('https://raw.githubusercontent.com/pdf-rs/fax/5d70a161e33b62305f8bce7af3f7fbd011cfaf5d/LICENSE', '7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff'),
     }
+    def reviewed_text(url, checksum):
+        if (not re.fullmatch(r'https://raw\.githubusercontent\.com/[^/]+/[^/]+/[0-9a-f]{40}/[^?#]+', url)
+                or not re.fullmatch(r'[0-9a-f]{64}', checksum)):
+            raise RuntimeError('Reviewed license source must pin an immutable revision and digest')
+        cache = out / '.license-inputs'; cache.mkdir(exist_ok=True)
+        path = cache / checksum
+        if not path.is_file(): fetch(url, path, 4 * 1024 * 1024)
+        if artifact.digest(path.read_bytes()) != checksum:
+            raise RuntimeError('Reviewed original license checksum mismatch')
+        return path.read_text(encoding='utf-8')
+
+    def mit_terms():
+        text = reviewed_text(*recovered['cookie-factory', '0.3.3'])
+        return text[text.index('Permission is hereby granted'):]
+
     for key in sorted(selected):
         p = packages[key]; location = Path(p['manifest_path']).parent
         identity = p['name'] + ' ' + p['version']
@@ -153,39 +169,68 @@ def collect_notices(metadata, source, out, target):
         origin = origin.replace('crates.io/api/v1/crates/home/', 'crates.io/api/v1/crates/h%6fme/')
         texts.append('\n' + '=' * 78 + '\n' + identity + '\nSource: ' + origin + '\nDeclared license: ' + str(p.get('license')) + '\nPublished authors: ' + json.dumps(p.get('authors', []), ensure_ascii=False) + '\n')
         files = []
+        # Cargo packages may inherit a license file outside the member directory.
+        # Follow only an explicitly declared file inside its own source checkout.
+        if p.get('license_file'):
+            license_path = Path(p['license_file'])
+            if not license_path.is_absolute(): license_path = location / license_path
+            license_path = license_path.resolve()
+            boundary = location.resolve()
+            if str(p.get('source', '')).startswith('git+'):
+                boundary = next((parent for parent in [boundary, *boundary.parents]
+                                 if (parent / '.git').exists()), boundary)
+            if license_path.is_relative_to(boundary) and license_path.is_file():
+                if license_path.stat().st_size > 4 * 1024 * 1024:
+                    raise RuntimeError('Unexpected oversized declared license')
+                files.append((license_path.relative_to(boundary).as_posix(), license_path.read_text(encoding='utf-8')))
         for path in sorted(location.rglob('*')):
             if not path.is_file() or path.is_symlink(): continue
             relative = path.relative_to(location).as_posix()
             if any(part in ('target', '.git', 'node_modules') for part in Path(relative).parts): continue
-            if (re.match(r'(?i)^(license|licence|copying|copyright|notice)([.\-_]|$)', path.name)
+            if ((re.match(r'(?i)^(license|licence|copying|copyright|notice)([.\-_]|$)', path.name)
+                     and path.suffix.lower() not in ('.rs', '.py', '.c', '.h', '.cpp', '.js', '.ts', '.go', '.java'))
                     or any(part.upper() in ('LICENSES', 'LICENCES') for part in path.relative_to(location).parts[:-1])
                     or path == Path(p.get('license_file') or '/nonexistent')):
                 if path.stat().st_size > 4 * 1024 * 1024: raise RuntimeError('Unexpected oversized dependency notice')
                 try: text = path.read_text(encoding='utf-8')
                 except UnicodeDecodeError: continue
                 files.append((relative, text))
+        for evidence in reviewed_sources.get(p['name'] + '@' + p['version'], []):
+            url, checksum = evidence['url'], evidence['sha256']
+            text = reviewed_text(url, checksum)
+            if artifact.digest(text.encode()) not in {artifact.digest(t.encode()) for _, t in files}:
+                files.append((url, text))
+            if evidence.get('selected_license'):
+                selected = evidence['selected_license']
+                if selected not in ('MIT', 'Apache-2.0') or selected not in re.findall(r'[A-Za-z0-9.+-]+', str(p.get('license'))):
+                    raise RuntimeError('Reviewed license option differs from package declaration')
+                if selected == 'MIT':
+                    texts.append('Upstream supplies no original copyright line; published authors and original licensing statement retained. No year or holder invented.\n')
+                files.append(('Explicitly reviewed ' + selected + ' terms; original declaration retained',
+                              mit_terms() if selected == 'MIT' else (source / 'LICENSE').read_text(encoding='utf-8')))
         if (p['name'], p['version']) in recovered:
             url, checksum = recovered[p['name'], p['version']]
-            with tempfile.TemporaryDirectory() as temporary:
-                path = Path(temporary) / 'license'; fetch(url, path, 1024 * 1024)
-                if artifact.digest(path.read_bytes()) != checksum: raise RuntimeError('Recovered notice checksum mismatch')
-                if p['name'] != 'cookie-factory': texts.append('Notice recovered from accepted immediate-child upstream license-only repair; not originally packaged.\n')
-                files.append((url, path.read_text(encoding='utf-8')))
+            if p['name'] != 'cookie-factory': texts.append('Notice recovered from accepted immediate-child upstream license-only repair; not originally packaged.\n')
+            files.append((url, reviewed_text(url, checksum)))
         if not files and p['name'] == 'debugserver-types' and p['version'] == '0.5.0':
-            url, checksum = recovered['cookie-factory', '0.3.3']
-            with tempfile.TemporaryDirectory() as temporary:
-                path = Path(temporary) / 'mit'; fetch(url, path, 1024 * 1024)
-                if artifact.digest(path.read_bytes()) != checksum: raise RuntimeError('Canonical MIT terms checksum mismatch')
-                terms = path.read_text(encoding='utf-8'); terms = terms[terms.index('Permission is hereby granted'):]
             texts.append('Upstream declares MIT and names authors but supplies no original copyright line; no year or holder invented. Full canonical permission/disclaimer follow.\n')
-            files = [('Canonical MIT terms (copyright line not invented)', terms)]
+            files = [('Canonical MIT terms (copyright line not invented)', mit_terms())]
         if not files and p['name'] in ('eventsource-stream', 'io_tee') and 'Apache-2.0' in str(p.get('license')):
             files = [('Declared Apache-2.0 option selected; upstream omits original license file', (source / 'LICENSE').read_text(encoding='utf-8'))]
         if not files and 'Apache-2.0' in str(p.get('license')):
             for path in sorted(location.rglob('*.rs')):
                 prefix = path.read_text(encoding='utf-8', errors='replace')[:2000]
-                if prefix.startswith('/*') and 'Copyright' in prefix and 'Apache' in prefix and '*/' in prefix:
-                    files = [(path.relative_to(location).as_posix() + ' original header', prefix.split('*/', 1)[0] + '*/\n'),
+                header = ''
+                if prefix.startswith('/*') and '*/' in prefix:
+                    header = prefix.split('*/', 1)[0] + '*/\n'
+                elif prefix.startswith('//'):
+                    lines = []
+                    for line in prefix.splitlines():
+                        if not line.startswith('//'): break
+                        lines.append(line)
+                    header = '\n'.join(lines) + '\n'
+                if 'Copyright' in header and 'Apache' in header:
+                    files = [(path.relative_to(location).as_posix() + ' original header', header),
                              ('Selected Apache-2.0 full terms', (source / 'LICENSE').read_text(encoding='utf-8'))]
                     break
         if not files and not p.get('source'):
