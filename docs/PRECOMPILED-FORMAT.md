@@ -39,9 +39,17 @@ python3 scripts/release_artifact.py sanitize \
 
 首个 `0.164.0-custom.1` 前端来源提交与历史 receipt 一致；原工作树差异逐字节匹配原补丁，公开补丁相较原运行补丁新增六行归属注释。原前端 SHA-256 为 `f0db692e37868cf47dc688a9d9160a3ba2ad38f4ce18985e2c4d8b09781c8aed`。对独立副本完成 5,641 处等长 home 前缀清理并重新签名后，前端 SHA-256 为 `6c1beb1f82e549ca7b9122fdb6af6da6293e8c367a46cc3687d862aa129a23c4`。严格签名核对、隔离 HOME 下 `--version` 和 `--help` 均通过。没有重跑 Rust 编译，原安装前端摘要保持不变。新前端随后已在无构建工具且禁止源码读取的隔离环境完成真实安装与交互验收。
 
-依赖通知来自现有 release 前端 fingerprint 图及精确缓存源码记录：1,366 个图节点全部解析，保守收集 1,029 个软件包，包含构建依赖，不能等同最终链接组件的精确清单。另纳入 Rust 标准库、现有内嵌技能和本地原生依赖通知；动态依赖只有 macOS 系统库，不复制这些系统文件。MPL 组件提供对应版本源码 URL。通知文本 SHA-256 为 `c339b8a87f9eedfbd0e10c1b0fd08aa1bce36338f9f313b6b8f89dc26dfe62e7`。
+依赖通知来自现有 release 前端 fingerprint 图及精确缓存源码记录：1,366 个图节点全部解析，保守收集 1,029 个软件包，包含构建依赖，不能等同最终链接组件的精确清单。另纳入 Rust 标准库、现有内嵌技能和本地原生依赖通知；动态依赖只有 macOS 系统库，不复制这些系统文件。MPL 组件提供对应版本源码 URL。通知文本 SHA-256 为 `c2e1968ec88eee2c032fa25237e0ba80b571bab57e94fe1b99e64add4a4860e1`。
 
-六个上游软件包在精确版本源码中缺少独立许可文本，通知保留声明条款、可用作者资料及来源依据。cookie-factory、debugserver-types、fax、fax_derive 四个 MIT 情况仍需维护者在公开分发前审查；eventsource-stream 和 io_tee 使用其声明的 Apache-2.0 选项。不虚构版权人或年份。来源记录将状态标为 `local-reviewed/public-maintainer-review-required`，允许本地候选验证，不表示许可、公开分发或发布授权已全部完成。全量历史 TUI 测试的 38 个已诊断失败继续保留，不能描述为全部通过。
+四项 MIT 依赖已完成来源复核。先前将 cookie-factory 列为上游文本缺失并不准确：registry 包缺少这些文件，但精确上游提交内有 `.reuse/dep5` 和 `LICENSES/MIT.txt`，此前扫描漏掉了特殊目录。现在已补入原始文件，不能把本次修正描述成原先已审清。
+
+| 组件 | 已核对并保留的来源 |
+| --- | --- |
+| cookie-factory 0.3.3 | 精确提交 `d36b805dbd7dd65f2df947235c5bcc573afe2c76` 的 [署名及适用范围](https://github.com/rust-bakery/cookie-factory/blob/d36b805dbd7dd65f2df947235c5bcc573afe2c76/.reuse/dep5)与[完整 MIT 原文](https://github.com/rust-bakery/cookie-factory/blob/d36b805dbd7dd65f2df947235c5bcc573afe2c76/LICENSES/MIT.txt)，原署名为 2017–2023 Geoffroy Couprie |
+| fax 0.2.6 / fax_derive 0.2.0 | 原版本已声明 MIT；其直接后继[提交](https://github.com/pdf-rs/fax/commit/5d70a161e33b62305f8bce7af3f7fbd011cfaf5d)于 2025-09-15 添加[原始许可证](https://github.com/pdf-rs/fax/blob/5d70a161e33b62305f8bce7af3f7fbd011cfaf5d/LICENSE)，署名逐字保留；derive/LICENSE 指向根目录 LICENSE，通知中放入目标全文。明确这是后续上游证据，不声称旧包原本带有该文件 |
+| debugserver-types 0.5.0 | [精确版本 manifest](https://github.com/Marwes/debugserver-types/blob/d444f163123af5b4fbce7375d1afead7e9b8a224/Cargo.toml)明确声明 MIT 与作者 Markus Westerlind；所查精确源码及当前上游未提供独立版权行。保留该声明、可用作者资料、固定版本来源及完整 MIT 条款，不虚构版权人或年份，不声称找回了不存在于所查材料中的版权行 |
+
+cookie-factory 原始 MIT 文本 SHA-256 为 `d09216dc1ea5f273997667935a8d6514d80f00b89fb6954ecc3a43e0a6e360de`，fax 根许可证为 `7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff`。eventsource-stream 与 io_tee 继续使用其声明的 Apache-2.0 选项。完成来源核对不等同独立法律背书或公开发布授权；debugserver-types 的上游资料限制仍准确列出。旧 `.6` 候选中的四项待查说明属于本次修订前的历史状态。
 
 本地安装要求三个 runtime 成员齐备；源码构建模块仅复用官方包识别与复制边界，默认运行路径不调用其构建入口。预编译 receipt 覆盖前端、运行组件及复制的完整资源；共享 state 锁保护安装、更新下载、激活、卸载和启动核对；发行运行租约阻止删除正在使用的资源。
 
