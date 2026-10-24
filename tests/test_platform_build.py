@@ -166,6 +166,17 @@ class NoticeGenerationTests(unittest.TestCase):
             with self.assertRaises(builder.artifact.ReleaseError):
                 builder.artifact.privacy_check(binary.read_bytes())
 
+    def test_reviewed_native_literals_require_exact_bytes(self):
+        # Actual public TUI labels/enum metadata merged by the Linux linker.
+        literals = [
+            b'Bearer ' + b'tokenOAuthConversationStartParamsoutput_modalityinitial_items_countInvalidLanguageInvalidSubtagDuplicatedExtensionKnownDomainPathUriGoProProLiteProMaxSelfServeBusinessProLiteSelfServeBusinessUsageBasedEnt26EnterpriseCbpAutomationEnterpriseCbpUsageBasedEnterpriseEduEduPlusEduProSciSciPlusDataErrormarkerstr_contextsilentBindTcpConnectTcpExecuteWriteFileReadDirRemoveDirRemoveFileMakeDirMakeRegMakeBlockMakeSymReferRefreshTokenFailedErrorhas_detailed_explanationhas_steerhas_review_targetExpiredExhaustedRevokedDataMarkerId',
+            b'sk' + b'-progresspull-request-numberbranch-changesapproval-modecontext-window-sizeraw-outputworkspace-headlinecontext-detailsoptionModelNameModelWithReasoningCurrentDirProjectRootGitBranchPullRequestNumberBranchChangesStatusPermissionsApprovalModeContextUsedFiveHourLimitWeeklyLimitCodexVersionContextWindowSizeUsedTokensTotalOutputTokensThreadCreditsEstimatedThreadCostSessionIdRawOutputThreadNameThreadTitleWorkspaceHeadlineTaskProgressContextDetailsTrustedFileidevimsetup-default-sandboxexperimentalimportnewappcompactrecapbtwexportrawdaemoncdpwdusagedebug-configstatuslinelogoutrolloutpscleartest-approvaldebug-m-dropdebug-m-updatePreContextPrevChunkNextChunkInvalidOffsetutf-8',
+        ]
+        for value in literals:
+            builder.artifact.privacy_check(value)
+            with self.assertRaises(builder.artifact.ReleaseError):
+                builder.artifact.privacy_check(value + b'fixturesecretvalue')
+
     def test_credentials_adjacent_to_other_binary_literals_still_fail(self):
         for prefix in (b'\0', b'field', b'const_', b'prefix-'):
             for marker in (b'sk' + b'-', b'gh' + b'p_', b'Bearer '):

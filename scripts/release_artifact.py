@@ -144,6 +144,11 @@ RULES = {
 }
 # Static upstream literals can be reviewed by SHA-256, never raw sensitive values.
 REVIEWED_LITERALS = {
+    # Native Linux x64: public MCP authentication labels and enum metadata;
+    # public status-line fields plus the context-details patch. Every byte was
+    # matched to the fixed official frontend or published source before review.
+    '19e1e9278dbaf5c4dd55e967721c8841efe2cab8102755d3a8c47a7adde8761a',
+    'b11b05836e1d14e1a8e545ee9993775686a79664ef457b42b94250e56a9dbc2a',
     # Public websocket-auth CLI help merged with its clap argument metadata.
     # Pinned upstream codex-rs/websocket-auth/src/lib.rs:56-57; no secret value.
     '670faf85aaeed7e56aa3fe7a2fba71e4a98d328ffc2c83d56a2a000f788100c8',
