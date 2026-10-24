@@ -66,7 +66,7 @@ def main():
                 if result.returncode:
                     # Only fixed exception names / numeric OS codes are public diagnostics.
                     # Captured stderr may contain temporary paths; never print it.
-                    errors = re.findall(rb'(?:[A-Za-z]+Error|\[WinError [0-9]+\])', result.stderr)
+                    errors = re.findall(rb'\b(?:PermissionError|FileNotFoundError|OSError|RuntimeError|ValueError|TimeoutError)\b|\[WinError [0-9]{1,5}\]', result.stderr)
                     report['failure'] = dict(exit_code=result.returncode,
                                              error_kinds=sorted(set(x.decode('ascii') for x in errors)))
                     raise RuntimeError('Native acceptance command failed (exit ' + str(result.returncode) + '; ' + ', '.join(report['failure']['error_kinds']) + ')')

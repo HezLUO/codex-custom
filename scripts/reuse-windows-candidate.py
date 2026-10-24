@@ -55,6 +55,11 @@ def main():
                 repository_commit='63f435c5fe17223597d92f173a533593d020bb5d', archive_sha256=ARCHIVE_SHA256,
                 binary_sha256=artifact.digest(binary.read_bytes()), rust_compiled_in_this_run=False,
                 rust_tests_executed_in_this_run=False)
+            provenance['rust_tests_executed_in_this_run'] = False
+            provenance['rust_test_evidence'] = dict(status='previous-native-tests-passed',
+                run_id=40103098988, job_id=120899100332, counts=[2, 20, 9, 37, 7],
+                source_commit='63f435c5fe17223597d92f173a533593d020bb5d',
+                url='https://github.com/HezLUO/codex-custom/actions/runs/40103098988/job/120899100332')
             provenance['runtime_source_commit'] = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
             proof = work / 'provenance.json'; proof.write_text(json.dumps(provenance))
             runtime = {'runtime/precompiled.py': 'scripts/precompiled.py',
@@ -63,12 +68,14 @@ def main():
                 'bootstrap.py': 'bootstrap.py', 'bootstrap.sh': 'bootstrap.sh', 'bootstrap.ps1': 'bootstrap.ps1'}
             packaged = artifact.package(argparse.Namespace(binary=binary, provenance=proof,
                 dependency_notices=notices, release_id='0.164.0-custom.10', target=TARGET,
-                output=out / 'codex-custom.tar.gz',
+                output=work / 'codex-custom.tar.gz',
                 runtime=[name + '=' + str(ROOT / path) for name, path in runtime.items()]))
-            refreshed, members = artifact.read_archive(out / 'codex-custom.tar.gz', expected_target=TARGET)
+            refreshed, members = artifact.read_archive(work / 'codex-custom.tar.gz', expected_target=TARGET)
             for name in ('bin/codex.exe', 'DEPENDENCY-NOTICES.txt', 'LICENSE', 'NOTICE'):
                 if members[name] != payload[name]:
                     raise RuntimeError('Compiled payload or original notices changed')
+            for name in ('codex-custom.tar.gz', 'codex-custom.tar.gz.sha256'):
+                shutil.copyfile(work / name, out / name)
             descriptor = {key: refreshed[key] for key in ('schema', 'release_id', 'official_version', 'target', 'layout_version')}
             descriptor.update(archive='codex-custom.tar.gz', sha256=packaged['sha256'])
             (out / 'release.json').write_text(json.dumps(descriptor, indent=2))
