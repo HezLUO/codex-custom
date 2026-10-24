@@ -15,6 +15,37 @@ builder = importlib.util.module_from_spec(spec); spec.loader.exec_module(builder
 
 
 class NoticeGenerationTests(unittest.TestCase):
+    def test_native_test_reuse_requires_the_same_rust_inputs_patch_and_target(self):
+        source = (ROOT / 'scripts/build-platform.py').read_text()
+        patch_bytes = (ROOT / 'patches/codex-0.164.0-context-details.patch').read_bytes()
+        image = '20261022.344.1'
+        evidence = builder.native_test_evidence('x86_64-pc-windows-msvc', image_version=image)
+        self.assertEqual(sum(evidence['counts']), 75)
+        self.assertEqual(evidence['job_id'], 120833295631)
+        mutations = [("TOOLCHAIN = '1.99.1'", "TOOLCHAIN = '0.0.0'"),
+                     ("'--remap-path-prefix='", "'--cfg=changed='"),
+                     ("'--release', '--target'", "'--quiet', '--target'"),
+                     ("'status_surface'", "'changed_filter'"),
+                     ('cwd=cwd, check=True, text=True,',
+                      "cwd=cwd, check=True, text=True, env=dict(os.environ, RUSTFLAGS='--cfg=changed'),")]
+        for before, after in mutations:
+            self.assertIn(before, source)
+            with self.assertRaises(RuntimeError):
+                builder.native_test_evidence('x86_64-pc-windows-msvc', source.replace(before, after), patch_bytes, image_version=image)
+        with self.assertRaises(RuntimeError):
+            builder.native_test_evidence('x86_64-pc-windows-msvc', source, patch_bytes + b'\n', image_version=image)
+        with self.assertRaises(RuntimeError):
+            builder.native_test_evidence('aarch64-apple-darwin', source, patch_bytes)
+        with self.assertRaises(RuntimeError):
+            builder.native_test_evidence('x86_64-pc-windows-msvc', updater_bytes=b'changed Cargo lock normalizer', image_version=image)
+        workflow = (ROOT / '.github/workflows/build-platforms.yml').read_bytes()
+        self.assertIn(b"PYTHONUTF8: '1'", workflow)
+        with self.assertRaises(RuntimeError):
+            builder.native_test_evidence('x86_64-pc-windows-msvc',
+                                        workflow_bytes=workflow.replace(b"PYTHONUTF8: '1'", b"RUSTFLAGS: changed"), image_version=image)
+        with self.assertRaises(RuntimeError):
+            builder.native_test_evidence('x86_64-pc-windows-msvc', image_version='changed-runner-image')
+
     def test_reviewed_license_requires_exact_bytes_and_declared_option(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary); source = root / 'source'; source.mkdir()
@@ -172,6 +203,7 @@ class NoticeGenerationTests(unittest.TestCase):
             b'Bearer ' + b'tokenOAuthConversationStartParamsoutput_modalityinitial_items_countInvalidLanguageInvalidSubtagDuplicatedExtensionKnownDomainPathUriGoProProLiteProMaxSelfServeBusinessProLiteSelfServeBusinessUsageBasedEnt26EnterpriseCbpAutomationEnterpriseCbpUsageBasedEnterpriseEduEduPlusEduProSciSciPlusDataErrormarkerstr_contextsilentBindTcpConnectTcpExecuteWriteFileReadDirRemoveDirRemoveFileMakeDirMakeRegMakeBlockMakeSymReferRefreshTokenFailedErrorhas_detailed_explanationhas_steerhas_review_targetExpiredExhaustedRevokedDataMarkerId',
             b'sk' + b'-progresspull-request-numberbranch-changesapproval-modecontext-window-sizeraw-outputworkspace-headlinecontext-detailsoptionModelNameModelWithReasoningCurrentDirProjectRootGitBranchPullRequestNumberBranchChangesStatusPermissionsApprovalModeContextUsedFiveHourLimitWeeklyLimitCodexVersionContextWindowSizeUsedTokensTotalOutputTokensThreadCreditsEstimatedThreadCostSessionIdRawOutputThreadNameThreadTitleWorkspaceHeadlineTaskProgressContextDetailsTrustedFileidevimsetup-default-sandboxexperimentalimportnewappcompactrecapbtwexportrawdaemoncdpwdusagedebug-configstatuslinelogoutrolloutpscleartest-approvaldebug-m-dropdebug-m-updatePreContextPrevChunkNextChunkInvalidOffsetutf-8',
             b'sk' + b'-progresspull-request-numberbranch-changesapproval-modecontext-window-sizeraw-outputworkspace-headlinecontext-detailsoptionModelNameModelWithReasoningCurrentDirProjectRootHostnameGitBranchPullRequestNumberBranchChangesStatusPermissionsApprovalModeContextRemainingContextUsedFiveHourLimitWeeklyLimitCodexVersionContextWindowSizeUsedTokensTotalInputTokensTotalOutputTokensThreadCreditsEstimatedThreadCostSessionIdFastModeDaybreakRawOutputThreadNameThreadTitleWorkspaceHeadlineTaskProgressContextDetailsTrustedFilePreContextPrevChunkNextChunkInvalidOffset',
+            b'sk' + b'-progresshostnamepull-request-numberbranch-changesapproval-modecontext-window-sizeraw-outputworkspace-headlinecontext-detailsReasoningSummaryCell_headertranscript_onlysource_item_idMcpInventoryLoadingCellThreadRecapLoadingCellAgentMessageCellis_first_line',
         ]
         for value in literals:
             builder.artifact.privacy_check(value)

@@ -13,6 +13,11 @@ on:
           - x86_64-unknown-linux-musl
           - aarch64-unknown-linux-musl
           - x86_64-pc-windows-msvc
+      reuse_reviewed_rust_tests:
+        description: Reuse reviewed native tests only for unchanged, fingerprint-bound Rust inputs
+        type: boolean
+        required: false
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -67,7 +72,7 @@ jobs:
         shell: pwsh
         run: ./upstream/.github/actions/setup-msvc-env/setup-msvc-env.ps1 -Target $env:TARGET
       - name: Build and prepare reviewable candidate
-        run: python scripts/build-platform.py build --source upstream --work "$RUNNER_TEMP/custom-build" --output dist
+        run: python scripts/build-platform.py build --source upstream --work "$RUNNER_TEMP/custom-build" --output dist ${{ inputs.reuse_reviewed_rust_tests && '--reuse-reviewed-tests' || '' }}
       - name: Linux disposable runner sandbox prerequisites
         if: runner.os == 'Linux'
         run: |

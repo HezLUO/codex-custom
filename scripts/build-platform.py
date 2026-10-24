@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Native CI candidate builder. Never publishes or modifies a live installation."""
 import argparse
+import ast
 import hashlib
 from html.parser import HTMLParser
 import importlib.util
@@ -298,7 +299,60 @@ def redact_build_paths(binary, target, prefixes):
     return len(edits)
 
 
-def build(source, work, out, target):
+def rust_test_inputs(source_text):
+    """Fingerprint unchanged native Rust preparation and the actual test command.
+
+    Ignore Python comments and the optional reuse branch, but include the pinned
+    inputs, preparation function, compiler setup and original test loop.
+    """
+    tree = ast.parse(source_text)
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    body = functions['build'].body
+    tests = next(node for node in ast.walk(functions['build'])
+                 if isinstance(node, ast.For) and isinstance(node.iter, ast.Name) and node.iter.id == 'TESTS')
+    boundary = next(i for i, node in enumerate(body) if tests in ast.walk(node))
+    constants = [node for node in tree.body if isinstance(node, ast.Assign)
+                 and any(isinstance(name, ast.Name) and name.id in
+                         ('COMMIT', 'VERSION', 'TOOLCHAIN', 'TESTS', 'OFFICIAL_PACKAGES') for name in node.targets)]
+    helpers = [functions[name] for name in ('run', 'fetch', 'write_environment', 'prepare', 'collect_notices')]
+    nodes = [*constants, *helpers, *body[:boundary], tests]
+    return artifact.digest('\n'.join(ast.dump(node, include_attributes=False) for node in nodes).encode())
+
+
+def native_test_evidence(target, source_text=None, patch_bytes=None, *, updater_bytes=None,
+                         workflow_bytes=None, image_version=None):
+    # Reviewed completed native jobs, each with 2+20+9+37+7 passing tests.
+    jobs = {'x86_64-unknown-linux-musl': 120833295662,
+            'aarch64-unknown-linux-musl': 120833295563,
+            'x86_64-pc-windows-msvc': 120833295631}
+    images = {'x86_64-unknown-linux-musl': '20261012.334.1',
+              'aarch64-unknown-linux-musl': '20261012.149.1',
+              'x86_64-pc-windows-msvc': '20261022.344.1'}
+    expected_inputs = '6c9c07322f51472d17e67f53148ae0b489f3a742e6117295775f19fc2ac67089'
+    expected_patch = '740d23d18e7e18aa67f320ef8bdb6cb0e2cca62544db4578a59c1ef6465e2d76'
+    expected_updater = 'aba48af3d3fe419f61cb92c30bd88e59d3711478bd659a3f62d775cbd151d6e7'
+    # This reviewed workflow adds only the optional reuse input/argument to the
+    # original test workflow. Any later CI environment/step change rejects reuse.
+    expected_workflow = 'c3b27a6cb7666d42ef08881f87cc1ab461166909fc59bfc8851de95525912575'
+    source_text = source_text if source_text is not None else Path(__file__).read_text(encoding='utf-8')
+    patch_bytes = patch_bytes if patch_bytes is not None else (ROOT / 'patches/codex-0.164.0-context-details.patch').read_bytes()
+    updater_bytes = updater_bytes if updater_bytes is not None else (ROOT / 'update-codex-custom.py').read_bytes()
+    workflow_bytes = workflow_bytes if workflow_bytes is not None else (ROOT / '.github/workflows/build-platforms.yml').read_bytes()
+    image_version = image_version if image_version is not None else os.environ.get('ImageVersion')
+    if (target not in jobs or rust_test_inputs(source_text) != expected_inputs or artifact.digest(patch_bytes) != expected_patch
+            or artifact.digest(updater_bytes) != expected_updater or artifact.digest(workflow_bytes) != expected_workflow
+            or image_version != images[target]):
+        raise RuntimeError('Reviewed native tests do not match these Rust inputs or target; run fresh tests')
+    return dict(status='previous-native-tests-passed', target=target,
+                source_commit='d07e043fec08892a2d233ac183e8eb75f684aab5',
+                run_id=40080647103, job_id=jobs[target], counts=[2, 20, 9, 37, 7],
+                rust_inputs_sha256=expected_inputs, patch_sha256=expected_patch,
+                updater_sha256=expected_updater, reviewed_workflow_sha256=expected_workflow,
+                runner_image_version=image_version,
+                url='https://github.com/HezLUO/codex-custom/actions/runs/40080647103/job/' + str(jobs[target]))
+
+
+def build(source, work, out, target, reuse_reviewed_tests=False):
     import tomllib
     if run(['git', 'rev-parse', 'HEAD'], source, True).strip() != COMMIT or run(['git', 'status', '--porcelain'], source, True).strip():
         raise RuntimeError('Build requires a clean pinned source')
@@ -329,11 +383,16 @@ def build(source, work, out, target):
     report = collect_notices(metadata, source, out, target)
     if report['missing_original_texts']:
         raise RuntimeError('Target notice review has unresolved original texts; inspect license-review.json before compiling')
-    for name in TESTS:
-        result = run([*cargo, 'test', '--locked', '--release', '--target', target, '-p', 'codex-tui', '--lib', name], rust, True)
-        summary = re.search(r'test result: ok\. [1-9][0-9]* passed', result)
-        if not summary: raise RuntimeError('Targeted tests did not pass: ' + name)
-        print('Native test ' + name + ': ' + summary.group(), flush=True)
+    if reuse_reviewed_tests:
+        test_evidence = native_test_evidence(target)
+        print('Reusing 75 passed native Rust tests for unchanged inputs: ' + test_evidence['url'], flush=True)
+    else:
+        for name in TESTS:
+            result = run([*cargo, 'test', '--locked', '--release', '--target', target, '-p', 'codex-tui', '--lib', name], rust, True)
+            summary = re.search(r'test result: ok\. [1-9][0-9]* passed', result)
+            if not summary: raise RuntimeError('Targeted tests did not pass: ' + name)
+            print('Native test ' + name + ': ' + summary.group(), flush=True)
+        test_evidence = None
     run([*cargo, 'build', '--locked', '--release', '--target', target, '-p', 'codex-cli', '--bin', 'codex'], rust)
     binary = Path(os.environ['CARGO_TARGET_DIR']) / target / 'release' / ('codex.exe' if portable.windows(target) else 'codex')
     if target.endswith('apple-darwin'):
@@ -384,6 +443,8 @@ def build(source, work, out, target):
                       toolchain=TOOLCHAIN, target=target, tests=TESTS, upstream_commit=COMMIT,
                       official_package_sha256=os.environ['CODEX_CUSTOM_CI_OFFICIAL_SHA256'],
                       distribution_review={'status': 'target-source-review-required', 'dependency_notice_sha256': artifact.digest((out / 'DEPENDENCY-NOTICES.txt').read_bytes())})
+    provenance['rust_tests_executed_in_this_run'] = not reuse_reviewed_tests
+    if test_evidence: provenance['rust_test_evidence'] = test_evidence
     if 'linux' in target: provenance['official_bwrap_sha256'] = os.environ['CODEX_BWRAP_SHA256']
     provenance_file = work / 'provenance.json'; provenance_file.write_text(json.dumps(provenance))
     runtime = {'runtime/precompiled.py': 'scripts/precompiled.py', 'runtime/release_artifact.py': 'scripts/release_artifact.py',
@@ -405,12 +466,14 @@ def main():
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--work', type=Path, required=True)
     parser.add_argument('--output', type=Path)
+    parser.add_argument('--reuse-reviewed-tests', action='store_true',
+                        help='Reuse reviewed native test jobs only if all bound Rust inputs match')
     args = parser.parse_args(); target = portable.host_target()
     if os.environ.get('TARGET', target) != target: raise RuntimeError('Matrix target does not match native runner')
     if args.action == 'prepare': prepare(args.source.resolve(), args.work.resolve(), target)
     else:
         if not args.output: parser.error('--output required for build')
-        build(args.source.resolve(), args.work.resolve(), args.output.resolve(), target)
+        build(args.source.resolve(), args.work.resolve(), args.output.resolve(), target, args.reuse_reviewed_tests)
 
 
 if __name__ == '__main__':

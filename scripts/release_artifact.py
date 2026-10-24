@@ -150,6 +150,8 @@ REVIEWED_LITERALS = {
     '19e1e9278dbaf5c4dd55e967721c8841efe2cab8102755d3a8c47a7adde8761a',
     'b11b05836e1d14e1a8e545ee9993775686a79664ef457b42b94250e56a9dbc2a',
     '28a34563dd7b11cd9cf98f16433b493c07280f295672135b37caf6bc6a34616f',
+    # Native Windows x64 public status-line fields and TUI cell metadata.
+    '0b8ce28c57d560d5dc474c281033b0588abff1176d476eaf852f1f4b2dd9f5fd',
     # Public websocket-auth CLI help merged with its clap argument metadata.
     # Pinned upstream codex-rs/websocket-auth/src/lib.rs:56-57; no secret value.
     '670faf85aaeed7e56aa3fe7a2fba71e4a98d328ffc2c83d56a2a000f788100c8',
