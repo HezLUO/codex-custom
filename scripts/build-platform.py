@@ -340,9 +340,9 @@ def native_test_evidence(target, source_text=None, patch_bytes=None, *, updater_
     expected_inputs = '630b8cf18218151cb4da2761dc0945aa07b9ec1b1d3d9d1962125135d1128d5c'
     expected_patch = '740d23d18e7e18aa67f320ef8bdb6cb0e2cca62544db4578a59c1ef6465e2d76'
     expected_updater = 'aba48af3d3fe419f61cb92c30bd88e59d3711478bd659a3f62d775cbd151d6e7'
-    # This reviewed workflow adds only the optional reuse input/argument to the
-    # original test workflow. Any later CI environment/step change rejects reuse.
-    expected_workflow = 'c3b27a6cb7666d42ef08881f87cc1ab461166909fc59bfc8851de95525912575'
+    # The reviewed retry workflow preserves the original compilation environment
+    # and test loop, and retains privacy-admitted candidates after smoke failures.
+    expected_workflow = '0aeaf81c6769b2da46283d72c4ae593bc2b413732ff6d33a3de2906acb178755'
     source_text = source_text if source_text is not None else Path(__file__).read_text(encoding='utf-8')
     patch_bytes = patch_bytes if patch_bytes is not None else (ROOT / 'patches/codex-0.164.0-context-details.patch').read_bytes()
     updater_bytes = updater_bytes if updater_bytes is not None else (ROOT / 'update-codex-custom.py').read_bytes()

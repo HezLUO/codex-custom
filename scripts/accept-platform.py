@@ -20,6 +20,12 @@ portable = artifact
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def launcher_command(launcher, arguments, windows):
+    if windows:
+        return ['cmd.exe', '/d', '/s', '/c', '"' + subprocess.list2cmdline([str(launcher), *arguments]) + '"']
+    return [launcher, *arguments]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--archive', type=Path, required=True)
@@ -61,10 +67,7 @@ def main():
             if args.baseline: report['checks'].append('previous-release installer/runtime upgrade')
             if str(ROOT) in launcher.read_text(encoding='utf-8'): raise RuntimeError('Launcher retains checkout path')
             def invoke(*arguments):
-                if portable.windows():
-                    # Fixed smoke-test arguments; no untrusted shell text.
-                    return call(['cmd.exe', '/d', '/s', '/c', '"' + subprocess.list2cmdline([str(launcher), *arguments]) + '"'])
-                return call([launcher, *arguments])
+                return call(launcher_command(launcher, arguments, portable.windows()))
             if invoke('--version').strip() != b'codex-cli 0.164.0': raise RuntimeError('Installed version mismatch')
             invoke('resume', '--help'); report['checks'] += ['source-independent launcher', 'version', 'resume argument forwarding']
             # Exercise downloader and update with another explicit custom revision.

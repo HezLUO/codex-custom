@@ -18,6 +18,11 @@ on:
         type: boolean
         required: false
         default: false
+      command_checks_only:
+        description: Run native command regressions without compiling a candidate
+        type: boolean
+        required: false
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -25,6 +30,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   candidate:
+    name: ${{ inputs.command_checks_only && 'Native command checks' || 'candidate' }} (${{ matrix.target }})
     # Public candidate artifacts require review; uploading does not create a Release.
     strategy:
       fail-fast: false
@@ -59,22 +65,26 @@ jobs:
           python -m unittest discover -s tests -p test_platform_support.py
           python -m unittest discover -s tests -p test_platform_build.py
       - name: Prepare verified official resources and build inputs
+        if: ${{ !inputs.command_checks_only }}
         run: python scripts/build-platform.py prepare --source upstream --work "$RUNNER_TEMP/custom-build"
       - name: Rust toolchain
+        if: ${{ !inputs.command_checks_only }}
         run: |
           rustup toolchain install 1.99.1 --profile minimal --component rust-docs
           rustup target add --toolchain 1.99.1 "$TARGET"
       - name: Linux native MUSL tools
-        if: runner.os == 'Linux'
+        if: ${{ !inputs.command_checks_only && runner.os == 'Linux' }}
         run: bash upstream/.github/scripts/install-musl-build-tools.sh
       - name: Windows MSVC environment
-        if: runner.os == 'Windows'
+        if: ${{ !inputs.command_checks_only && runner.os == 'Windows' }}
         shell: pwsh
         run: ./upstream/.github/actions/setup-msvc-env/setup-msvc-env.ps1 -Target $env:TARGET
       - name: Build and prepare reviewable candidate
+        if: ${{ !inputs.command_checks_only }}
+        id: native_build
         run: python scripts/build-platform.py build --source upstream --work "$RUNNER_TEMP/custom-build" --output dist ${{ inputs.reuse_reviewed_rust_tests && '--reuse-reviewed-tests' || '' }}
       - name: Linux disposable runner sandbox prerequisites
-        if: runner.os == 'Linux'
+        if: ${{ !inputs.command_checks_only && runner.os == 'Linux' }}
         run: |
           if [ -f /proc/sys/kernel/unprivileged_userns_clone ]; then
             sudo sysctl -w kernel.unprivileged_userns_clone=1
@@ -83,9 +93,10 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
       - name: Native isolated install and uninstall
+        if: ${{ !inputs.command_checks_only }}
         run: python scripts/accept-platform.py --archive dist/codex-custom.tar.gz --official "$CODEX_CUSTOM_CI_OFFICIAL" --output dist/acceptance.json
-      - name: Keep successful native candidates
-        if: success()
+      - name: Keep privacy-reviewed native candidates
+        if: ${{ always() && steps.native_build.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: candidate-${{ matrix.target }}
