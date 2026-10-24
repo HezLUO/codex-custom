@@ -1,0 +1,2 @@
+# Keep source patches and release input digests identical on all native runners.
+* text=auto eol=lf
