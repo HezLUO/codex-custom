@@ -1,6 +1,6 @@
 # 本地预编译候选格式
 
-`python3 scripts/release_artifact.py package` 从单个前端、独立来源记录及依赖通知生成 tar.gz 与 SHA-256 文件。归档外保留原始证据，不能把现有安装目录作为输入目录。`inspect` 检查归档结构、隐私规则、元数据与逐文件摘要，不执行归档中的程序；安装器必须在独立暂存目录另行调用 `verify_binary`，核对 Mach-O arm64、严格 ad hoc 签名及 `codex-cli 0.164.0`。
+`python3 scripts/release_artifact.py package` 从单个前端、独立来源记录及依赖通知生成 tar.gz 与 SHA-256 文件。归档外保留原始证据，不能把现有安装目录作为输入目录。`inspect` 检查归档结构、隐私规则、元数据与逐文件摘要，不执行归档中的程序；安装器必须在独立暂存目录另行调用 `verify_binary`，在对应原生平台核对 Mach-O / ELF / PE 架构及 `codex-cli 0.164.0`，macOS 另核对严格 ad hoc 签名。其他平台尚待真实构建验收，见[平台决定](adr/0002-native-platform-candidates.md)。
 
 ```sh
 python3 scripts/release_artifact.py package \
@@ -15,9 +15,9 @@ python3 scripts/release_artifact.py package \
 python3 scripts/release_artifact.py inspect ../candidate/codex-custom.tar.gz
 ```
 
-格式版本为 `release.json` 中的 `schema: 1`。必要字段为 `release_id`、`official_version`、`target`、`layout_version`、`source_commit`、`patch_sha256`、`signing`、`provenance` 与 `members`。首版固定官方 0.164.0、aarch64-apple-darwin、standalone layout 1。`members` 对每个有效负载记录 SHA-256 与 Unix mode；不包含清单本身，以免递归。打包器生成全归档 SHA-256 sidecar。安装下载需要可信传输及明确发行定位；同来源摘要只是完整性检查，不能独立证明发布者身份。
+格式版本为 `release.json` 中的 `schema: 1`。必要字段为 `release_id`、`official_version`、`target`、`layout_version`、`source_commit`、`patch_sha256`、`signing`、`provenance` 与 `members`。已验证首版为官方 0.164.0、aarch64-apple-darwin、standalone layout 1；新增平台候选沿用 schema 1 与官方版本/布局限制，只接受平台决定中的精确 target。`members` 对每个有效负载记录 SHA-256 与 Unix mode；不包含清单本身，以免递归。打包器生成全归档 SHA-256 sidecar。安装下载需要可信传输及明确发行定位；同来源摘要只是完整性检查，不能独立证明发布者身份。
 
-必要成员为 `bin/codex`、`LICENSE`、`NOTICE`、`DEPENDENCY-NOTICES.txt`。安装阶段可以明确加入 `runtime/precompiled.py`、`runtime/release_artifact.py`、`runtime/update-codex-custom.py` 、`bootstrap.sh` 和 `bootstrap.py`，每个组件同样列入摘要及隐私审查。拒绝未声明成员、目录、链接、重复成员、PAX 扩展、未知权限、越界名称、单文件超限、256 MiB 压缩归档超限及 768 MiB 累计解压内容超限。下载时同样限制读取总量。官方 helper 与语音资源从用户本机匹配官方包复制，不放进归档。
+必要成员为 `bin/codex`（Windows 为 `bin/codex.exe`）、`LICENSE`、`NOTICE`、`DEPENDENCY-NOTICES.txt`；禁止混入另一平台前端。安装阶段可以明确加入 `runtime/precompiled.py`、`runtime/release_artifact.py`、`runtime/update-codex-custom.py` 、`bootstrap.sh` 和 `bootstrap.py`，Windows 可另带 `bootstrap.ps1`；Unix 归档保留旧下载器的封闭成员接口。每个组件同样列入摘要及隐私审查。拒绝未声明成员、目录、链接、重复成员、PAX 扩展、未知权限、越界名称、单文件超限、256 MiB 压缩归档超限及 768 MiB 累计解压内容超限。下载时同样限制读取总量。官方 helper 与语音资源从用户本机匹配官方包复制，不放进归档。
 
 ## 现有二进制复用
 
@@ -78,3 +78,9 @@ cookie-factory 原始 MIT 文本 SHA-256 为 `d09216dc1ea5f273997667935a8d6514d8
 另外七项凭据正则命中跨越 Rust 合并静态字符串边界：`codex-rs/network-proxy/src/credential_broker/providers/` 的公开前缀分类器和环境变量名；`codex-rs/tui/src/history_cell/mcp.rs` 的标签与 `codex-rs/protocol/src/protocol.rs` 调试字段；`codex-rs/tui/src/bottom_pane/status_line_setup.rs` 的状态标识；`codex-rs/websocket-auth/src/lib.rs` 的四组 clap 帮助、参数名及紧邻静态错误消息。它们不被宣称为单一完整源文字串或可重现构建证明。
 
 复核时固定前端摘要，按相同正则在内存扫描，只输出规则、偏移、长度和匹配摘要；UUID 可与固定源码逐字节匹配，合并字符串则按源码常量与编译文本邻接关系检查。完整私有审阅笔记留在仓库外。新增不同匹配或前端来源变化必须重新审阅，不扩大为规则级豁免。
+
+## 新平台候选边界
+
+新增运行组件按官方版本与精确平台共同选择发行；Windows 使用常规文件指针和 `.cmd` 入口，不要求文件符号链接权限，锁使用系统共享/排他接口。Linux 前端必须绑定实际复用的官方 bwrap 摘要。复制官方完整包后，仅替换前端并同步 voice 外层 manifest 中前端的摘要；其他资源、voice 运行时和原始官方目录保持不变。显式源码构建先对独立前端副本完成 strip/签名再暂存，避免清单封存处理前的字节。
+
+GitHub 构建仅手动运行、保持私有审查；不自动发布。新平台逐一收集通知、构建与验收，未完成前不扩大实际兼容声明。详细执行约定见[平台决定](adr/0002-native-platform-candidates.md)。

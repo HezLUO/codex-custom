@@ -138,7 +138,7 @@ python3 update-codex-custom.py --force  # 强制重建
 
 相对自定义目录按启动时工作目录解析，建议使用绝对路径。源码可放在含空格的路径中。从符号链接调用源码启动器时，请使用安装脚本生成的 shim；直接 `ln -s` 不受支持。
 
-为保留官方 standalone 安装身份，完整定制包写入解析后的官方包父目录下 `codex-custom/<唯一构建编号>/package`。它不替换官方程序或官方选择链接。只有主程序被替换，helper、rg、语音资源及元数据逐文件核对保留；对定制主程序执行 strip 和本地 ad-hoc 签名。
+为保留官方 standalone 安装身份，完整定制包写入解析后的官方包父目录下 `codex-custom/<唯一构建编号>/package`。它不替换官方程序或官方选择链接。只有主程序被替换，helper、rg 与语音运行时逐文件核对保留，voice 外层 manifest 只同步前端摘要；对定制主程序执行 strip 和本地 ad-hoc 签名。
 
 ## 开发者源码路径的更新、失败与卸载
 

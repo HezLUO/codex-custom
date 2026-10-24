@@ -278,12 +278,16 @@ def build(version, source=None, force=False):
                 raise RuntimeError(f"Unexpected binary version: {reported}")
             run([binary, "--help"], rust_root, env)
             release = Path(tempfile.mkdtemp(prefix=f"{version}-", dir=INSTALL))
-            stage_package(official_root, binary, release)
-            packaged_binary = release / "package/bin/codex"
             # Match the official macOS runtime symbol stripping; retain the cache's
-            # unstripped artifact and use a local signature on the packaged copy.
-            run(["/usr/bin/strip", "-S", "-x", packaged_binary])
-            run(["/usr/bin/codesign", "--force", "--sign", "-", packaged_binary])
+            # unstripped artifact. Finalize before staging so the outer voice
+            # manifest records the final signed bytes rather than the build input.
+            with tempfile.TemporaryDirectory(prefix="frontend-", dir=WORK) as temporary:
+                frontend = Path(temporary) / "codex"
+                shutil.copy2(binary, frontend)
+                run(["/usr/bin/strip", "-S", "-x", frontend])
+                run(["/usr/bin/codesign", "--force", "--sign", "-", frontend])
+                stage_package(official_root, frontend, release)
+            packaged_binary = release / "package/bin/codex"
             run(["/usr/bin/codesign", "--verify", "--strict", packaged_binary])
             receipt = package_inventory(release / "package")
             run([release / "package/bin/codex", "--version"], rust_root, env)

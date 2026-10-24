@@ -228,6 +228,8 @@ checksum = "unchanged"
                 root = Path(directory)
                 official = root / "standalone/releases/official"
                 make_official_package(official)
+                voice_manifest = official / 'codex-resources/voice/manifest.json'
+                voice_manifest.write_text(json.dumps({'sha256': {'bin/codex': updater.file_hash(official / 'bin/codex')}, 'buildCommit': 'upstream'}))
                 before = updater.package_inventory(official)
                 state = root / "state"
                 state.mkdir()
@@ -265,6 +267,10 @@ checksum = "unchanged"
                             output = "codex-cli 0.164.0\n"
                         elif args[0] == "/usr/bin/codesign" and "--verify" in args and scenario == "signature-failure":
                             self.code = 1
+                        elif args[0] == '/usr/bin/strip':
+                            frontend = Path(args[-1]); frontend.write_bytes(frontend.read_bytes() + b'-stripped')
+                        elif args[0] == '/usr/bin/codesign' and '--force' in args:
+                            frontend = Path(args[-1]); frontend.write_bytes(frontend.read_bytes() + b'-signed')
                         self.stdout = io.StringIO(output)
 
                     def wait(self):
@@ -281,7 +287,10 @@ checksum = "unchanged"
                         updater.build("0.164.0")
                         self.assertNotEqual((state / "current").readlink(), Path("old"))
                         self.assertTrue(updater.current_matches("0.164.0"))
-                        self.assertEqual((state / "current/codex").read_bytes(), b"release-binary")
+                        self.assertEqual((state / "current/codex").read_bytes(), b"release-binary-stripped-signed")
+                        self.assertEqual((work / 'target/aarch64-apple-darwin/release/codex').read_bytes(), b'release-binary')
+                        voice = json.loads((state / 'current/package/codex-resources/voice/manifest.json').read_text())
+                        self.assertEqual(voice['sha256']['bin/codex'], updater.file_hash(state / 'current/codex'))
                         test_commands = [cmd for cmd in commands if "test" in cmd]
                         self.assertEqual([cmd[-1] for cmd in test_commands], updater.TEST_FILTERS)
                         self.assertTrue(any("--release" in cmd and "--locked" in cmd for cmd in commands))
