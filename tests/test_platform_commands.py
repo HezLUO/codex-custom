@@ -74,6 +74,48 @@ class CrossTargetCommands(unittest.TestCase):
                 self.assertEqual(sentinel.read_text(), 'keep'); self.assertFalse((parent / 'package').exists())
                 self.assertEqual(Path(self.env['CODEX_OFFICIAL_BIN']).read_bytes(), original)
 
+    def test_legacy_windows_launcher_migration_rolls_back_with_failed_activation(self):
+        target = 'x86_64-pc-windows-msvc'; self.prepare(target)
+        result = self.command(*self.payload(target)); self.assertEqual(result.returncode, 0, result.stderr)
+        launcher = self.bin / 'codex-custom.cmd'; current = launcher.read_text()
+        legacy = current.replace('@(goto) 2>nul & ', '@echo off\nrem codex-custom-precompiled-v1\n')
+        self.assertNotEqual(current, legacy)
+        original = legacy.replace('\n', '\r\n').encode(); launcher.write_bytes(original)
+        pointer = self.root / 'state/current.json'; before = pointer.read_bytes()
+        adapter = Path(self.env['PYTHONPATH']) / 'sitecustomize.py'
+        adapter.write_text(adapter.read_text().replace("str(destination).endswith('/current')", "str(destination).endswith(('/current', '/current.json'))"))
+        self.env['FIXTURE_FAIL_ACTIVATION'] = '1'
+        result = self.command(*self.payload(target)); self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(launcher.read_bytes(), original)
+        self.assertEqual(pointer.read_bytes(), before)
+        del self.env['FIXTURE_FAIL_ACTIVATION']
+        result = self.command(*self.payload(target)); self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(launcher.read_text(), current)
+        launcher.write_bytes(original); before = pointer.read_bytes()
+        adapter.write_text(adapter.read_text().replace(
+            "        raise PermissionError('fixture activation denied')",
+            "        Path(os.environ['FIXTURE_FOREIGN_ON_ROLLBACK']).write_bytes(b'foreign-after-migration')\n        raise PermissionError('fixture activation denied')"))
+        self.env['FIXTURE_FAIL_ACTIVATION'] = '1'
+        self.env['FIXTURE_FOREIGN_ON_ROLLBACK'] = str(launcher)
+        result = self.command(*self.payload(target)); self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(launcher.read_bytes(), b'foreign-after-migration')
+        self.assertEqual(pointer.read_bytes(), before)
+
+    def test_launcher_replaced_during_staging_is_not_overwritten(self):
+        target = 'x86_64-pc-windows-msvc'; self.prepare(target)
+        result = self.command(*self.payload(target)); self.assertEqual(result.returncode, 0, result.stderr)
+        launcher = self.bin / 'codex-custom.cmd'
+        pointer = self.root / 'state/current.json'; before = pointer.read_bytes()
+        adapter = Path(self.env['PYTHONPATH']) / 'sitecustomize.py'
+        marker = "        version = re.search"
+        adapter.write_text(adapter.read_text().replace(marker,
+            "        if os.environ.get('FIXTURE_SWAP_LAUNCHER'): Path(os.environ['FIXTURE_SWAP_LAUNCHER']).write_bytes(b'foreign-sentinel')\n" + marker))
+        self.env['FIXTURE_SWAP_LAUNCHER'] = str(launcher)
+        result = self.command(*self.payload(target))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(launcher.read_bytes(), b'foreign-sentinel')
+        self.assertEqual(pointer.read_bytes(), before)
+
     def test_linux_wrong_build_time_bwrap_digest_is_refused_before_activation(self):
         self.prepare('x86_64-unknown-linux-musl')
         result = self.command(*self.payload('x86_64-unknown-linux-musl', bad_bwrap=True))

@@ -98,13 +98,15 @@ def matches_shim(state, text):
     return text == shim(state) or (portable.windows() and text == shim(state, legacy_windows=True))
 
 
-def replace_shim(destination, data):
+def replace_shim(destination, data, *, expected):
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as stream:
             temporary = Path(stream.name)
             stream.write(data)
         temporary.chmod(0o755)
+        if portable.is_link(destination) or not destination.is_file() or destination.read_bytes() != expected:
+            raise RuntimeError('Launcher changed during installation; refusing replacement')
         os.replace(temporary, destination)
     finally:
         if temporary is not None:
@@ -279,9 +281,16 @@ def install(archive, checksum, bin_dir, state, lock_held=False):
                     created_shim = True
                     stream.write(expected)
                 destination.chmod(0o755)
-            if exists and destination.read_text() != expected:
-                previous_shim = destination.read_bytes()
-                replace_shim(destination, expected.encode())
+            if exists:
+                if portable.is_link(destination) or not destination.is_file():
+                    raise RuntimeError('Launcher changed during installation; refusing replacement')
+                original = destination.read_bytes()
+                text = original.decode().replace('\r\n', '\n').replace('\r', '\n')
+                if not matches_shim(state, text):
+                    raise RuntimeError('Launcher changed during installation; refusing replacement')
+                if portable.windows() and text != expected:
+                    replace_shim(destination, expected.encode(), expected=original)
+                    previous_shim = original
             if not owner:
                 (state / 'owner.json').write_text(json.dumps(dict(owner=OWNER, launcher=str(destination), installation_id=installation_id, package_parent=str(root.parent / 'codex-custom'))) + '\n')
             link = state / ('activate-' + uuid.uuid4().hex)
@@ -296,8 +305,9 @@ def install(archive, checksum, bin_dir, state, lock_held=False):
             if not activated:
                 if link is not None:
                     link.unlink(missing_ok=True)
-                if previous_shim is not None:
-                    replace_shim(destination, previous_shim)
+                if (previous_shim is not None and not portable.is_link(destination)
+                        and destination.is_file() and destination.read_bytes() == expected.encode()):
+                    replace_shim(destination, previous_shim, expected=expected.encode())
                 if created_shim:
                     destination.unlink(missing_ok=True)
                 if not owner:
