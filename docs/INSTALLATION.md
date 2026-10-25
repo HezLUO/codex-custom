@@ -1,6 +1,6 @@
 # 安装预编译版本
 
-这些命令在对应 GitHub Release 正式发布后可用。当前仍在等待发布确认。
+五个平台的 [GitHub Release](https://github.com/HezLUO/codex-custom/releases) 已于 2026-10-25 发布，以下命令现在可用；请先确认兼容范围。
 
 ## 安装前
 

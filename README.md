@@ -8,38 +8,38 @@ Context 95% left (33.8K used / 475K)
 
 当前上下文用量来自官方 `last_token_usage`，使用官方百分比公式；累计会话 token 不作为当前用量。上下文未知或更新尚未完成时，字段按补丁规则隐藏。
 
-这是可审查的开源项目，与 OpenAI 无隶属或背书关系。源码与任务记录已在 [HezLUO/codex-custom](https://github.com/HezLUO/codex-custom) 公开，采用 Apache-2.0；预编译候选已完成验证，尚未正式发布。已确定的发行目标是通过一条终端命令下载安装经过验证的预编译版本，源码构建保留为可选方式，见[安装方式决定](docs/adr/0001-precompiled-installation.md)。
+这是可审查的开源项目，与 OpenAI 无隶属或背书关系。源码与任务记录已在 [HezLUO/codex-custom](https://github.com/HezLUO/codex-custom) 公开，采用 Apache-2.0；五个平台的预编译安装包已[正式发布](https://github.com/HezLUO/codex-custom/releases)。通过一条终端命令下载安装经过验证的预编译版本，源码构建保留为可选方式，见[安装方式决定](docs/adr/0001-precompiled-installation.md)。
 
-已实现预编译候选的下载、本地安装、匹配更新、离线启动及安全卸载。目前尚无正式发行的安装包，已有实际下载验收使用本地测试服务；公开源码不代表预编译安装已可用。
+预编译发行支持下载、本地安装、匹配更新、离线启动及安全卸载。已核对五个平台的公开下载资产及其 SHA-256；兼容范围仍仅为下述官方版本与包布局。
 
-版本、平台、归档摘要和验证限制见[发布说明草案](docs/RELEASE-NOTES.md)，安装、更新与卸载步骤见[安装指令](docs/INSTALLATION.md)。
+版本、平台、归档摘要和验证限制见[发布说明](docs/RELEASE-NOTES.md)，安装、更新与卸载步骤见[安装指令](docs/INSTALLATION.md)。
 
 ## 支持范围
 
 - 已有运行验收：macOS Apple Silicon，官方 CLI **0.164.0**，官方 standalone `codex` 包布局 v1。
-- Intel Mac、Linux x64/ARM64、Windows x64 已完成原生构建与隔离安装生命周期验收，成品下载后的独立检查也通过；仍是尚未正式发布的候选，未覆盖完整 TUI、voice、Windows 普通权限控制台或所有 Linux 发行版。
+- Intel Mac、Linux x64/ARM64、Windows x64 已完成原生构建与隔离安装生命周期验收，成品下载后的独立检查也通过；对应安装包已正式发布；未覆盖完整 TUI、voice、Windows 普通权限控制台或所有 Linux 发行版。
 - npm/Homebrew 布局尚未支持。官方版本变化后仅取得明确匹配的发行；尚无发行便停止。未来版本须由维护者移植与验收，不宣称已有真实兼容。
 - 默认预编译安装需要 Python 3.9+ 和匹配官方包；macOS 另需系统 codesign；无需 Rust、Cargo、Git 或源码目录。官方包必须位于当前 `CODEX_HOME`（默认 `~/.codex`）的 `packages/standalone/releases` 中。
 - 显式开发者源码构建还需要 Git、Xcode Command Line Tools（含 `strip`、`codesign`）、通过 rustup 安装的 `cargo` 和 `rustup`（在 PATH 中），以及下载上游源码和 Rust 依赖的网络。
 - 更新器根据匹配版本源码的 `codex-rs/rust-toolchain.toml` 安装工具链。0.164.0 使用 Rust 1.99.1。首次构建为大型 Rust 工作区的优化构建，预留数十 GB 空间和较长编译时间；具体开销随机器、缓存而异，尚无全新环境基准。
 
-## 其他平台候选
+## 其他平台发行
 
-新增候选目标为 Intel Mac、Linux x64/ARM64 和 Windows x64，详见[平台决定及验收边界](docs/adr/0002-native-platform-candidates.md)。四个新增目标均通过原生构建、隐私与许可文本检查、安装、更新、离线启动和卸载验收；Linux 另通过实际 bwrap 执行，Windows 另通过原候选到修正版的真实升级。所有候选均未正式发布。
+新增候选目标为 Intel Mac、Linux x64/ARM64 和 Windows x64，详见[平台决定及验收边界](docs/adr/0002-native-platform-candidates.md)。四个新增目标均通过原生构建、隐私与许可文本检查、安装、更新、离线启动和卸载验收；Linux 另通过实际 bwrap 执行，Windows 另通过原候选到修正版的真实升级。对应的五个平台安装包已于 2026-10-25 正式发布。
 
 维护者可在 GitHub 仓库手动运行 `Build platform candidates`。它固定上游源码、工具链及官方资源，在对应系统构建，并在临时目录安装、更新、离线启动和卸载；Linux 另检查沙箱。缺失许可文本阻止打包。构建日志及候选产物在公开仓库中可见；流程不创建正式 Release。构建工具需要 Python 3.12+；普通用户仍只需 Python 3.9+，不编译 Rust。显式开发者源码构建入口仍限原有 macOS Apple Silicon 流程。 Windows 的 `Verify existing Windows candidate` 可固定复用已审查的编译产物，仅更新 Python 组件并重跑原生验收；其来源与不重编译证明见[验证记录](docs/VALIDATION.md)。
 
-Windows 成品正式发布后，预期使用 PowerShell：
+Windows 使用 PowerShell：
 
 ```powershell
 irm https://raw.githubusercontent.com/HezLUO/codex-custom/main/bootstrap.ps1 | iex
 ```
 
-这同样是尚未启用的发布后命令格式。Python 需在 PATH，官方程序默认从 LocalAppData 的 OpenAI/Codex 安装目录识别；其他位置使用 `CODEX_OFFICIAL_BIN` 明确指定完整 standalone 包内的 `codex.exe`。定制入口是 `codex-custom.cmd`，默认写入用户 `.local/bin`，按安装提示加入 PATH。Linux 与 Intel Mac 使用下面的 shell 入口；只在存在明确匹配且通过审查的成品时安装。
+Python 需在 PATH，官方程序默认从 LocalAppData 的 OpenAI/Codex 安装目录识别；其他位置使用 `CODEX_OFFICIAL_BIN` 明确指定完整 standalone 包内的 `codex.exe`。定制入口是 `codex-custom.cmd`，默认写入用户 `.local/bin`，按安装提示加入 PATH。Linux 与 Intel Mac 使用下面的 shell 入口；只在存在明确匹配且通过审查的成品时安装。
 
 ## 一条命令下载安装
 
-以下地址是安装包正式发布后的命令格式；引导脚本已公开，但匹配的 Release 产物尚未上传，因此目前还不能完成在线安装：
+macOS / Linux 使用：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/HezLUO/codex-custom/main/bootstrap.sh | sh
@@ -163,4 +163,4 @@ python3 scripts/audit-release.py
 
 ## 许可与归属
 
-候选项目采用 Apache-2.0，见 [LICENSE](LICENSE)。补丁包含来自 OpenAI Codex 的上下文，保留上游 [NOTICE](NOTICE)；修改说明见 [维护说明](docs/MAINTENANCE.md)。上游源码为 [openai/codex](https://github.com/openai/codex)，基线 tag 为 `rust-v0.164.0`。许可证及通知保留方案依据 [Apache-2.0 第 4 节](https://www.apache.org/licenses/LICENSE-2.0)。已有 Apple Silicon 候选已附依赖通知并完成本地检查；此前四项 MIT 依赖已完成来源复核，三项补入上游原文，另一项保留已发布作者及完整条款并明确来源限制。新增平台已按实际目标构建复核许可清单，未发现原始文本缺项；来源限制仍见验证记录。ad hoc 签名不认证发布者、未公证。源码审计和本地验收均不代表公开发布授权。
+本项目采用 Apache-2.0，见 [LICENSE](LICENSE)。补丁包含来自 OpenAI Codex 的上下文，保留上游 [NOTICE](NOTICE)；修改说明见 [维护说明](docs/MAINTENANCE.md)。上游源码为 [openai/codex](https://github.com/openai/codex)，基线 tag 为 `rust-v0.164.0`。许可证及通知保留方案依据 [Apache-2.0 第 4 节](https://www.apache.org/licenses/LICENSE-2.0)。已有 Apple Silicon 候选已附依赖通知并完成本地检查；此前四项 MIT 依赖已完成来源复核，三项补入上游原文，另一项保留已发布作者及完整条款并明确来源限制。新增平台已按实际目标构建复核许可清单，未发现原始文本缺项；来源限制仍见验证记录。ad hoc 签名不认证发布者、未公证。源码审计和本地验收均不代表公开发布授权。

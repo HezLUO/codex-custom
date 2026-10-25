@@ -1,6 +1,6 @@
 # Codex Custom 首次预编译发行说明
 
-发布草案，待维护者确认后发布。兼容官方 **Codex CLI 0.164.0 standalone layout v1**。
+已于 2026-10-25 [正式发布](https://github.com/HezLUO/codex-custom/releases)。兼容官方 **Codex CLI 0.164.0 standalone layout v1**。
 
 新增 `context-details` 底栏字段，显示与 `/status` 一致的当前上下文用量、容量和剩余百分比：
 
