@@ -67,7 +67,7 @@ cookie-factory 原始 MIT 文本 SHA-256 为 `d09216dc1ea5f273997667935a8d6514d8
 
 `sha256` 必须替换成实际归档的 64 位小写十六进制摘要；`release_id` 必须与归档内 `release.json` 一致。发布新定制修订时更新同一精确兼容 tag 下的描述与资产，不能将不兼容前端放入该 tag。描述文件上限 64 KiB、归档上限 256 MiB；固定归档文件名防止通过描述重定向到任意路径。每个归档成员必须与清单的名称、权限和摘要一致，之后才加载运行组件，统一安装器继续检查隐私、签名、版本和完整资源。描述与归档来自同一发行来源，SHA-256 不提供独立发布者认证。
 
-`bootstrap.sh` 与它取得的 `bootstrap.py` 是初始安装信任入口，来自用户选择的源码地址；它们尚无独立签名或固定外部信任摘要。shell 先检查 Python 3.9+ 和 macOS ARM64，再以 HTTPS 读取 Python 引导器；Python 在请求发行描述与归档前核对 codesign、完整官方包与资源。引导器也列入实际候选的摘要和隐私审查，但不能用归档自述的摘要反向证明最初下载的引导器身份。HTTPS 重定向不得降级到 HTTP。
+`bootstrap.sh` 与它取得的 `bootstrap.py` 是初始安装信任入口，来自用户选择的源码地址；它们尚无独立签名或固定外部信任摘要。shell 先检查 Python 3.9+ 和支持的 macOS/Linux 架构，再以 HTTPS 读取 Python 引导器；Python 在请求发行描述与归档前核对 codesign、完整官方包与资源。引导器也列入实际候选的摘要和隐私审查，但不能用归档自述的摘要反向证明最初下载的引导器身份。HTTPS 重定向不得降级到 HTTP。
 
 离线审查使用 `python3 scripts/install.py --archive FILE --sha256 SHA256`；在线审查使用 `python3 scripts/install.py --release-source URL`。`CODEX_CUSTOM_RELEASE_SOURCE` 覆盖默认发行根地址，`CODEX_CUSTOM_BOOTSTRAP_URL` 覆盖 shell 的 Python 引导器地址；仅 HTTPS 或 loopback HTTP 测试来源被允许。测试目录下放置 `official-0.164.0-aarch64-apple-darwin/release.json` 和 `codex-custom.tar.gz`，shell/Python 引导器可置于服务器根目录。这些选项不跳过任何归档或安装校验。
 

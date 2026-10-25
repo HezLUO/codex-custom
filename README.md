@@ -8,9 +8,11 @@ Context 95% left (33.8K used / 475K)
 
 当前上下文用量来自官方 `last_token_usage`，使用官方百分比公式；累计会话 token 不作为当前用量。上下文未知或更新尚未完成时，字段按补丁规则隐藏。
 
-这是可审查的开源项目，与 OpenAI 无隶属或背书关系。源码与任务记录已在 [HezLUO/codex-custom](https://github.com/HezLUO/codex-custom) 公开，采用 Apache-2.0；预编译安装包仍在构建和验证，尚未正式发布。已确定的发行目标是通过一条终端命令下载安装经过验证的预编译版本，源码构建保留为可选方式，见[安装方式决定](docs/adr/0001-precompiled-installation.md)。
+这是可审查的开源项目，与 OpenAI 无隶属或背书关系。源码与任务记录已在 [HezLUO/codex-custom](https://github.com/HezLUO/codex-custom) 公开，采用 Apache-2.0；预编译候选已完成验证，尚未正式发布。已确定的发行目标是通过一条终端命令下载安装经过验证的预编译版本，源码构建保留为可选方式，见[安装方式决定](docs/adr/0001-precompiled-installation.md)。
 
 已实现预编译候选的下载、本地安装、匹配更新、离线启动及安全卸载。目前尚无正式发行的安装包，已有实际下载验收使用本地测试服务；公开源码不代表预编译安装已可用。
+
+版本、平台、归档摘要和验证限制见[发布说明草案](docs/RELEASE-NOTES.md)，安装、更新与卸载步骤见[安装指令](docs/INSTALLATION.md)。
 
 ## 支持范围
 

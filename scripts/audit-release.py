@@ -7,6 +7,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_FILES = {
+    'docs/INSTALLATION.md', 'docs/RELEASE-NOTES.md',
     '.github/workflows/verify-windows.yml', 'scripts/reuse-windows-candidate.py',
     '.gitattributes',
     'scripts/native-license-sources.json', 'docs/NATIVE-LICENSE-SOURCES.md',
